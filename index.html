@@ -16,15 +16,16 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap');
         .logo-font { font-family: 'Dela Gothic One', cursive; }
+        body { background-color: #f1f5f9; }
     </style>
 </head>
-<body class="bg-slate-100">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- ⚠️ Firebase設定 (後で書き換える場所) ---
+        // --- Firebase設定（後で本番用に書き換えます） ---
         const firebaseConfig = {
           apiKey: "YOUR_API_KEY",
           authDomain: "YOUR_AUTH_DOMAIN",
@@ -41,125 +42,87 @@
         const db = firebase.firestore();
 
         const App = () => {
-            const [activeTab, setActiveTab] = useState('My Trip');
+            const [activeTab, setActiveTab] = useState('Trip');
             const [visibleMembers, setVisibleMembers] = useState(['ALL']);
             const [user, setUser] = useState(null);
             const [potatoId, setPotatoId] = useState(null);
 
-            // データ定義（10人分）
             const members = [
                 { id: 'ALL', name: '全員' },
-                { id: 'Member1', name: '名前1' }, { id: 'Member2', name: '名前2' },
-                { id: 'Member3', name: '名前3' }, { id: 'Member4', name: '名前4' },
-                { id: 'Member5', name: '名前5' }, { id: 'Member6', name: '名前6' },
-                { id: 'Member7', name: '名前7' }, { id: 'Member8', name: '名前8' },
-                { id: 'Member9', name: '名前9' }, { id: 'Member10', name: '名前10' }
+                { id: 'M1', name: '名前1' }, { id: 'M2', name: '名前2' },
+                { id: 'M3', name: '名前3' }, { id: 'M4', name: '名前4' },
+                { id: 'M5', name: '名前5' }, { id: 'M6', name: '名前6' },
+                { id: 'M7', name: '名前7' }, { id: 'M8', name: '名前8' },
+                { id: 'M9', name: '名前9' }, { id: 'M10', name: '名前10' }
             ];
 
             const events = [
                 { time: '09:00', title: '朝市の朝食', type: 'SHARED', owner: 'ALL' },
-                { time: '13:00', title: 'シーサイド・コワーキング', type: 'SHARED', owner: 'ALL' },
-                { time: '18:00', title: 'ジンギスカン', type: 'SHARED', owner: 'ALL' }
+                { time: '13:00', title: 'コワーキング', type: 'SHARED', owner: 'ALL' },
+                { time: '19:00', title: 'ジンギスカンパーティー', type: 'SHARED', owner: 'ALL' }
             ];
 
-            // ログイン監視
             useEffect(() => {
-              const unsubscribe = auth.onAuthStateChanged(async (u) => {
-                if (u) {
-                  setUser(u);
-                  const doc = await db.collection('users').doc(u.uid).get();
-                  if (doc.exists()) setPotatoId(doc.data().potatoId);
-                } else {
-                  setUser(null);
-                  setPotatoId(null);
-                }
-              });
-              return () => unsubscribe();
+                const unsubscribe = auth.onAuthStateChanged(async (u) => {
+                    if (u) {
+                        setUser(u);
+                        const doc = await db.collection('users').doc(u.uid).get();
+                        if (doc.exists()) setPotatoId(doc.data().potatoId);
+                    } else {
+                        setUser(null);
+                        setPotatoId(null);
+                    }
+                });
+                return () => unsubscribe();
             }, []);
 
-            // アイコン & QR生成
             useEffect(() => {
                 lucide.createIcons();
-                if (activeTab === 'Profile' && potatoId) {
-                  const qrContainer = document.getElementById('qrcode');
-                  if (qrContainer) {
-                    qrContainer.innerHTML = '';
-                    new QRCode(qrContainer, { text: potatoId, width: 128, height: 128 });
-                  }
+                if (activeTab === 'ID' && potatoId) {
+                    const qrContainer = document.getElementById('qrcode');
+                    if (qrContainer) {
+                        qrContainer.innerHTML = '';
+                        new QRCode(qrContainer, { text: potatoId, width: 140, height: 140 });
+                    }
                 }
             }, [activeTab, potatoId]);
 
             const signIn = async () => {
-              const provider = new firebase.auth.GoogleAuthProvider();
-              try {
-                const result = await auth.signInWithPopup(provider);
-                const u = result.user;
-                const userRef = db.collection('users').doc(u.uid);
-                const userDoc = await userRef.get();
-                if (!userDoc.exists()) {
-                  const newId = 'PBID-' + Math.random().toString(36).substring(2, 9).toUpperCase();
-                  await userRef.set({
-                    displayName: u.displayName,
-                    potatoId: newId,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                  });
-                  setPotatoId(newId);
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    const result = await auth.signInWithPopup(provider);
+                    const u = result.user;
+                    const userRef = db.collection('users').doc(u.uid);
+                    const userDoc = await userRef.get();
+                    if (!userDoc.exists()) {
+                        const newId = 'PBID-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+                        await userRef.set({
+                            displayName: u.displayName,
+                            potatoId: newId,
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        setPotatoId(newId);
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Firebase設定がまだのためログインできません（後ほど設定しましょう！）");
                 }
-              } catch (e) { console.error(e); alert("Firebase設定が必要です"); }
             };
 
             return (
-                <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden font-sans">
-                    <header className="bg-yellow-400 p-6 text-slate-800 shadow-sm">
-                        <h1 className="text-3xl logo-font tracking-tighter text-center">PotatoPlan</h1>
+                <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden font-sans border-x border-slate-200">
+                    <header className="bg-yellow-400 p-6 text-slate-800 shadow-sm flex flex-col items-center">
+                        <h1 className="text-3xl logo-font tracking-tighter">PotatoPlan</h1>
+                        <div className="mt-2 text-[10px] font-black bg-white/40 px-3 py-1 rounded-full uppercase tracking-widest">Hakodate Worcation Day 1</div>
                     </header>
 
                     <main className="flex-1 overflow-y-auto bg-white">
-                        {activeTab === 'Profile' ? (
+                        {activeTab === 'ID' ? (
                             <div className="p-8 flex flex-col items-center space-y-6">
-                                <h2 className="text-xl font-bold">My Potato ID</h2>
+                                <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Your Potato ID</h2>
                                 {user ? (
-                                    <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 w-full flex flex-col items-center shadow-inner">
-                                        <img src={user.photoURL} className="w-16 h-16 rounded-full mb-4 border-2 border-white shadow-md"/>
-                                        <p className="font-bold">{user.displayName}</p>
-                                        <div id="qrcode" className="p-2 bg-white rounded-xl shadow-md my-4"></div>
-                                        <p className="text-xl font-black logo-font">{potatoId}</p>
-                                        <button onClick={() => auth.signOut()} className="mt-8 text-xs text-slate-400 underline">ログアウト</button>
-                                    </div>
-                                ) : (
-                                    <button onClick={signIn} className="bg-white border p-4 rounded-full font-bold shadow-sm flex items-center gap-3">
-                                        <img src="https://authjs.dev/img/providers/google.svg" className="w-5 h-5"/> Googleでログイン
-                                    </button>
-                                )}
-                            </div>
-                        ) : (
-                            <>
-                                <div className="flex gap-4 p-4 overflow-x-auto border-b bg-slate-50 sticky top-0 z-10">
-                                    {members.map(m => (
-                                        <div key={m.id} onClick={() => m.id !== 'ALL' && setVisibleMembers(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
-                                             className={`cursor-pointer flex flex-col items-center min-w-[60px] p-2 rounded-xl transition-all ${visibleMembers.includes(m.id) ? 'bg-white shadow-md ring-2 ring-yellow-400' : 'opacity-40'}`}>
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold mb-1 ${m.id === 'ALL' ? 'bg-slate-800' : 'bg-blue-400'}`}>{m.name}</div>
-                                            <span className="text-[10px] font-bold">{m.name}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="p-6 border-l-2 border-yellow-100 ml-6 space-y-8 mt-4">
-                                    {events.filter(e => visibleMembers.includes(e.owner)).map((event, i) => (
-                                        <div key={i} className="relative">
-                                            <div className="absolute -left-[33px] top-1 w-4 h-4 rounded-full bg-yellow-400 border-2 border-white"></div>
-                                            <div className="text-[10px] font-black text-slate-300 mb-1">{event.time}</div>
-                                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm">
-                                                <div className="text-sm font-bold">{event.title}</div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </>
-                        )}
-                    </main>
-
-                    <nav className="bg-white border-t flex justify-around p-4 pb-8">
-                        <button onClick={() => setActiveTab('My Trip')} className={`flex flex-col items-center ${activeTab === 'My Trip' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="calendar"></i><span className="text-[10px] mt-1 font-bold">Trip</span></button>
-                        <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center ${activeTab === 'Chat' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="message-square"></i><span className="text-[10px] mt-1 font-bold">Chat</span></button>
-                        <button onClick={() => setActiveTab('Map')} className={`flex flex-col items-center ${activeTab === 'Map' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="map-pin"></i><span className="text-[10px] mt-1 font-bold">Map</span></button>
-                        <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center ${activeTab === 'Profile' ? 'text-yellow-60
+                                    <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center shadow-lg">
+                                        <img src={user.photoURL} className="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-md"/>
+                                        <p className="font-black text-lg text-slate-700">{user.displayName}</p>
+                                        <div id="qrcode" className="p-3 bg-white rounded-2xl shadow-inner my-6 border border-yellow-100"></div>
+                                        <p className="text-2xl font-black logo-font text-slate-800 bg-white
