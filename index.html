@@ -1,208 +1,238 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PotatoPlan</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap');
-        .logo-font { font-family: 'Dela Gothic One', cursive; }
-        body { background-color: #f1f5f9; -webkit-tap-highlight-color: transparent; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        @keyframes bounce-in {
-            0% { transform: translateY(100%); }
-            100% { transform: translateY(0); }
-        }
-        .animate-bounce-in { animation: bounce-in 0.3s ease-out; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+<script type="text/babel">
+    const { useState, useEffect } = React;
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+    // --- ⚠️ Firebase設定（反映済み） ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCcRLNQUUqgoIeLrudKJ9IsClwuc93WwHM",
+      authDomain: "potatoplan-9dedc.firebaseapp.com",
+      projectId: "potatoplan-9dedc",
+      storageBucket: "potatoplan-9dedc.firebasestorage.app",
+      messagingSenderId: "759154119060",
+      appId: "1:759154119060:web:665a705e2f848d4dce3f81",
+      databaseURL: "https://potatoplan-9dedc-default-rtdb.firebaseio.com"
+    };
 
-        // --- ⚠️ Firebase設定（反映済み） ---
-        const firebaseConfig = {
-          apiKey: "AIzaSyCcRLNQUUqgoIeLrudKJ9IsClwuc93WwHM",
-          authDomain: "potatoplan-9dedc.firebaseapp.com",
-          projectId: "potatoplan-9dedc",
-          storageBucket: "potatoplan-9dedc.firebasestorage.app",
-          messagingSenderId: "759154119060",
-          appId: "1:759154119060:web:665a705e2f848d4dce3f81",
-          databaseURL: "https://potatoplan-9dedc-default-rtdb.firebaseio.com"
-        };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+    const App = () => {
+        const [view, setView] = useState('TripList');
+        const [activeTab, setActiveTab] = useState('Trip');
+        const [user, setUser] = useState(null);
+        const [potatoId, setPotatoId] = useState(null);
+        const [events, setEvents] = useState([]);
+        
+        // 1. あなたの「ポテト仲間（マスターリスト）」
+        const [friends, setFriends] = useState([]);
+        // 2. このTripに参加している「召喚メンバー」
+        const [tripMembers, setTripMembers] = useState([{ id: 'ALL', name: '全員' }]);
+        
+        const [visibleMembers, setVisibleMembers] = useState(['ALL']);
+        const [showAddModal, setShowAddModal] = useState(false);
+        const [showSummonModal, setShowSummonModal] = useState(false);
+        const [summonId, setSummonId] = useState('');
 
-        const App = () => {
-            const [view, setView] = useState('TripList');
-            const [activeTab, setActiveTab] = useState('Trip');
-            const [user, setUser] = useState(null);
-            const [potatoId, setPotatoId] = useState(null);
-            const [events, setEvents] = useState([]);
-            const [showAddModal, setShowAddModal] = useState(false);
-            const [newPlan, setNewPlan] = useState({ time: '12:00', title: '', type: 'SHARED' });
+        // ログイン & 初期データロード
+        useEffect(() => {
+            const unsubscribe = auth.onAuthStateChanged(async (u) => {
+                if (u) {
+                    setUser(u);
+                    const doc = await db.collection('users').doc(u.uid).get();
+                    if (doc.exists()) {
+                        const userData = doc.data();
+                        setPotatoId(userData.potatoId);
+                        // 自分をTripメンバーの初期値に追加
+                        const me = { id: userData.potatoId, name: u.displayName, photo: u.photoURL };
+                        setTripMembers(prev => prev.find(m => m.id === me.id) ? prev : [...prev, me]);
+                        setVisibleMembers(prev => [...prev, me.id]);
+                        
+                        // 仲良しポテトリストをFirestoreから読み込む（今回はデモ用にStateで管理）
+                        // 本来は db.collection('users').doc(u.uid).collection('friends') から取得
+                    }
+                } else { setView('TripList'); }
+            });
+            return () => unsubscribe();
+        }, []);
 
-            useEffect(() => {
-                const unsubscribe = auth.onAuthStateChanged(async (u) => {
-                    if (u) {
-                        setUser(u);
-                        const doc = await db.collection('users').doc(u.uid).get();
-                        if (doc.exists()) setPotatoId(doc.data().potatoId);
-                    } else { setUser(null); setPotatoId(null); setView('TripList'); }
+        // 予定のリアルタイム同期
+        useEffect(() => {
+            if (view === 'MainApp') {
+                const unsubscribe = db.collection('events').orderBy('time').onSnapshot(snapshot => {
+                    setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 });
                 return () => unsubscribe();
-            }, []);
+            }
+        }, [view]);
 
-            useEffect(() => {
-                if (view === 'MainApp') {
-                    const unsubscribe = db.collection('events').orderBy('time').onSnapshot(snapshot => {
-                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setEvents(data);
-                    });
-                    return () => unsubscribe();
-                }
-            }, [view]);
+        // --- 仲間の追加（グローバル） ---
+        const handleAddFriend = async () => {
+            if (!summonId) return;
+            const snapshot = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
+            if (snapshot.empty) { alert("ポテトが見つかりません🍟"); return; }
+            
+            const friendData = snapshot.docs.data();
+            const newFriend = { id: friendData.potatoId, name: friendData.displayName, photo: friendData.photoURL };
+            
+            setFriends(prev => prev.find(f => f.id === newFriend.id) ? prev : [...prev, newFriend]);
+            setSummonId('');
+            alert(`${newFriend.name}と仲間になりました！🤝`);
+        };
 
-            useEffect(() => { lucide.createIcons(); }, [view, activeTab, showAddModal, events]);
+        // --- Tripへの召喚（仲間リストから選ぶ） ---
+        const summonToTrip = (friend) => {
+            setTripMembers(prev => prev.find(m => m.id === friend.id) ? prev : [...prev, friend]);
+            setVisibleMembers(prev => [...prev, friend.id]);
+            alert(`${friend.name}をTripに召喚しました！🏝️`);
+        };
 
-            const handleAddPlan = async () => {
-                if (!newPlan.title) return;
-                await db.collection('events').add({
-                    ...newPlan,
-                    owner: newPlan.type === 'SHARED' ? 'ALL' : (user?.displayName || 'Me'),
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                setShowAddModal(false);
-                setNewPlan({ time: '12:00', title: '', type: 'SHARED' });
-            };
+        useEffect(() => { lucide.createIcons(); }, [view, activeTab, showSummonModal, showAddModal, friends, tripMembers, events]);
 
-            if (view === 'TripList') {
-                return (
-                    <div className="max-w-md mx-auto h-screen bg-slate-50 flex flex-col p-6">
-                        <h1 className="text-4xl logo-font text-slate-800 mb-8 mt-10">My Trips</h1>
-                        <div className="space-y-4 flex-1">
-                            <div onClick={() => setView('MainApp')} className="bg-yellow-400 p-6 rounded-[32px] shadow-lg border-b-8 border-yellow-600 active:translate-y-1 active:border-b-4 transition-all cursor-pointer">
-                                <h3 className="text-2xl font-black text-slate-900 uppercase">函館 WORCATION</h3>
-                                <p className="text-sm font-bold text-slate-700 opacity-70 mt-1">2026.03.25 - 03.30</p>
+        if (view === 'TripList') {
+            return (
+                <div className="max-w-md mx-auto h-screen bg-slate-50 flex flex-col p-6 overflow-y-auto">
+                    <h1 className="text-4xl logo-font text-slate-800 mb-8 mt-10">My Trips</h1>
+                    <div className="bg-yellow-400 p-6 rounded-[32px] shadow-lg mb-10 cursor-pointer" onClick={() => setView('MainApp')}>
+                        <h3 className="text-2xl font-black italic uppercase">HAKODATE</h3>
+                        <p className="text-xs font-bold opacity-60">MEMBERS: {tripMembers.length - 1} ポテト</p>
+                    </div>
+
+                    <h2 className="text-xl font-black mb-4 flex items-center gap-2">
+                        <i data-lucide="users"></i> POTATO FRIENDS
+                    </h2>
+                    <div className="space-y-3 mb-20">
+                        {friends.length === 0 && <p className="text-xs text-slate-400">まだ仲間がいません。IDで追加しよう！</p>}
+                        {friends.map(f => (
+                            <div key={f.id} className="bg-white p-3 rounded-2xl flex items-center justify-between border shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <img src={f.photo} className="w-10 h-10 rounded-full border" />
+                                    <span className="font-bold text-sm">{f.name}</span>
+                                </div>
+                                <span className="text-[10px] font-mono bg-slate-100 px-2 py-1 rounded">{f.id}</span>
                             </div>
-                            <div className="bg-white p-6 rounded-[32px] border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 font-bold">
-                                <i data-lucide="plus" className="mr-2"></i> NEW TRIP
-                            </div>
+                        ))}
+                        <div className="mt-4 flex gap-2">
+                            <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 bg-white border-2 p-3 rounded-xl text-sm font-bold uppercase" />
+                            <button onClick={handleAddFriend} className="bg-slate-900 text-white px-4 rounded-xl font-bold text-xs uppercase">追加</button>
                         </div>
                     </div>
-                );
-            }
+                </div>
+            );
+        }
 
-            return (
-                <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden font-sans border-x border-slate-200">
-                    <header className="bg-yellow-400 p-6 text-slate-800 shadow-sm flex items-center justify-between">
-                        <button onClick={() => setView('TripList')}><i data-lucide="chevron-left"></i></button>
-                        <h1 className="text-2xl logo-font tracking-tighter">HAKODATE</h1>
-                        <button className="bg-slate-900 text-white text-[10px] px-3 py-1 rounded-full font-black">仲間の召喚</button>
-                    </header>
+        return (
+            <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden">
+                <header className="bg-yellow-400 p-6 text-slate-800 flex items-center justify-between shadow-sm">
+                    <button onClick={() => setView('TripList')}><i data-lucide="chevron-left"></i></button>
+                    <h1 className="text-2xl logo-font tracking-tighter uppercase">Hakodate</h1>
+                    <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-3 py-1 rounded-full font-black">召喚</button>
+                </header>
 
-                    <main className="flex-1 overflow-y-auto bg-white pb-24">
-                        {activeTab === 'ID' ? (
-                            <div className="p-8 flex flex-col items-center">
-                                <h2 className="text-xl font-black mb-6">Profile & ID</h2>
-                                {user ? (
-                                    <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center">
-                                        <img src={user.photoURL} className="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-md"/>
-                                        <p className="font-black text-lg">{user.displayName}</p>
-                                        <div id="qrcode" className="p-3 bg-white rounded-2xl shadow-inner my-6 border border-yellow-100"></div>
-                                        <p className="text-2xl font-black logo-font mt-6 bg-white px-4 py-2 rounded-xl shadow-sm border">{potatoId}</p>
-                                        <button onClick={() => auth.signOut()} className="mt-10 text-[10px] text-slate-400 underline">Sign Out</button>
+                <main className="flex-1 overflow-y-auto bg-white pb-24">
+                    {activeTab === 'ID' ? (
+                        <div className="p-8 flex flex-col items-center">
+                            <h2 className="text-xl font-black mb-6 italic uppercase tracking-widest">My Identity</h2>
+                            {user && (
+                                <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center">
+                                    <img src={user.photoURL} className="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-md"/>
+                                    <p className="font-black text-lg">{user.displayName}</p>
+                                    <p className="text-2xl font-black logo-font mt-4 bg-white px-4 py-2 rounded-xl border shadow-sm">{potatoId}</p>
+                                    <button onClick={() => auth.signOut()} className="mt-8 text-[10px] text-slate-400 underline">LOGOUT</button>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex gap-4 p-4 overflow-x-auto border-b bg-slate-50 sticky top-0 z-10 no-scrollbar">
+                                {tripMembers.map(m => (
+                                    <div key={m.id} onClick={() => m.id !== 'ALL' && setVisibleMembers(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
+                                         className={`cursor-pointer flex flex-col items-center min-w-[65px] p-2 rounded-2xl transition-all ${visibleMembers.includes(m.id) ? 'bg-white shadow-md ring-2 ring-yellow-400' : 'opacity-30'}`}>
+                                        {m.photo ? <img src={m.photo} className="w-12 h-12 rounded-full mb-1 border-2 border-white shadow-sm" /> : <div className="w-12 h-12 rounded-full bg-slate-800 text-white flex items-center justify-center font-black">ALL</div>}
+                                        <span className="text-[10px] font-black text-slate-600 truncate w-full text-center">{m.name.split(' ')}</span>
                                     </div>
-                                ) : (
-                                    <div className="flex flex-col items-center py-10">
-                                        <button onClick={() => {
-                                            const provider = new firebase.auth.GoogleAuthProvider();
-                                            auth.signInWithPopup(provider);
-                                        }} className="bg-white border-2 border-slate-800 px-8 py-4 rounded-full font-black flex items-center gap-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-                                            <img src="https://authjs.dev/img/providers/google.svg" className="w-5 h-5"/> LOGIN WITH GOOGLE
-                                        </button>
-                                    </div>
-                                )}
+                                ))}
                             </div>
-                        ) : (
-                            <div className="p-8 border-l-4 border-yellow-100 ml-8 space-y-10 mt-4">
-                                {events.map((event, i) => (
+                            <div className="p-8 border-l-4 border-yellow-100 ml-8 space-y-10">
+                                {events.filter(e => visibleMembers.includes(e.owner)).map((event, i) => (
                                     <div key={i} className="relative">
                                         <div className={`absolute -left-[40px] top-1 w-6 h-6 rounded-full border-4 border-white shadow-sm ${event.type === 'SHARED' ? 'bg-yellow-400' : 'bg-blue-400'}`}></div>
                                         <div className="text-[10px] font-black text-slate-300 mb-2 uppercase tracking-widest">{event.time}</div>
                                         <div className={`p-5 rounded-[24px] shadow-sm border-2 ${event.type === 'SHARED' ? 'bg-slate-50 border-slate-100' : 'bg-blue-50 border-blue-100'}`}>
                                             <div className="text-md font-black text-slate-700">{event.title}</div>
-                                            <div className="mt-2 text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
-                                                {event.type} {event.owner !== 'ALL' && `| BY ${event.owner}`}
-                                            </div>
+                                            <div className="mt-2 text-[9px] font-bold text-slate-400 uppercase">{event.type} | BY {event.ownerName}</div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
-                        )}
-                    </main>
-
-                    {activeTab === 'Trip' && (
-                        <button onClick={() => setShowAddModal(true)} className="absolute bottom-28 right-6 w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform z-20">
-                            <i data-lucide="plus" size={32}></i>
-                        </button>
+                        </>
                     )}
+                </main>
 
-                    {showAddModal && (
-                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end">
-                            <div className="w-full bg-white rounded-t-[40px] p-8 animate-bounce-in">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h2 className="text-2xl font-black italic">NEW PLAN</h2>
-                                    <button onClick={() => setShowAddModal(false)}><i data-lucide="x"></i></button>
-                                </div>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Title</label>
-                                        <input type="text" value={newPlan.title} onChange={e => setNewPlan({...newPlan, title: e.target.value})} className="w-full bg-slate-100 p-4 rounded-2xl font-bold outline-none" placeholder="予定を入力..." />
-                                    </div>
-                                    <div className="flex gap-4">
+                {/* Summon Modal (仲間リストから選ぶ) */}
+                {showSummonModal && (
+                    <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z- flex items-center justify-center p-6">
+                        <div className="w-full bg-white rounded-[40px] p-8 shadow-2xl max-h-[80%] flex flex-col">
+                            <h2 className="text-2xl font-black italic mb-4 uppercase">召喚リスト</h2>
+                            <div className="flex-1 overflow-y-auto space-y-4 pr-2 no-scrollbar">
+                                {friends.length === 0 && <p className="text-center py-10 text-slate-400 font-bold">まだ仲間がいません。<br/>Top画面で仲間を追加してね🍟</p>}
+                                {friends.map(f => (
+                                    <div key={f.id} onClick={() => summonToTrip(f)} className="bg-slate-50 p-4 rounded-3xl flex items-center gap-4 border-2 border-transparent active:border-yellow-400 active:bg-yellow-50 transition-all cursor-pointer">
+                                        <img src={f.photo} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" />
                                         <div className="flex-1">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Time</label>
-                                            <input type="time" value={newPlan.time} onChange={e => setNewPlan({...newPlan, time: e.target.value})} className="w-full bg-slate-100 p-4 rounded-2xl font-bold outline-none" />
+                                            <p className="font-black text-slate-700">{f.name}</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{f.id}</p>
                                         </div>
-                                        <div className="flex-1">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Type</label>
-                                            <select value={newPlan.type} onChange={e => setNewPlan({...newPlan, type: e.target.value})} className="w-full bg-slate-100 p-4 rounded-2xl font-bold outline-none">
-                                                <option value="SHARED">全員予定</option>
-                                                <option value="PERSONAL">自分の予定</option>
-                                            </select>
-                                        </div>
+                                        <i data-lucide="user-plus" className="text-slate-300"></i>
                                     </div>
-                                    <button onClick={handleAddPlan} className="w-full bg-yellow-400 p-5 rounded-2xl font-black text-slate-900 shadow-lg mt-4 active:scale-95 transition-all">ADD PLAN</button>
-                                </div>
+                                ))}
                             </div>
+                            <button onClick={() => setShowSummonModal(false)} className="mt-6 font-black text-slate-400 uppercase text-xs tracking-widest">閉じる</button>
                         </div>
-                    )}
+                    </div>
+                )}
 
-                    <nav className="bg-white border-t-2 border-slate-100 flex justify-around p-4 pb-10 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-10">
-                        <button onClick={() => setActiveTab('Trip')} className={`flex flex-col items-center ${activeTab === 'Trip' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="calendar"></i><span className="text-[9px] mt-1 font-black">TRIP</span></button>
-                        <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center ${activeTab === 'Chat' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="message-square"></i><span className="text-[9px] mt-1 font-black">CHAT</span></button>
-                        <button onClick={() => setActiveTab('ID')} className={`flex flex-col items-center ${activeTab === 'ID' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="user"></i><span className="text-[9px] mt-1 font-black">ID</span></button>
-                    </nav>
-                </div>
-            );
-        };
+                {/* Add Plan Modal (前と同じ) */}
+                {showAddModal && (
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end">
+                        <div className="w-full bg-white rounded-t-[40px] p-8 animate-bounce-in">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-2xl font-black italic uppercase">New Plan</h2>
+                                <button onClick={() => setShowAddModal(false)}><i data-lucide="x"></i></button>
+                            </div>
+                            <input type="text" value={newPlan.title} onChange={e => setNewPlan({...newPlan, title: e.target.value})} className="w-full bg-slate-100 p-4 rounded-2xl font-bold mb-4 outline-none" placeholder="何をする？" />
+                            <div className="flex gap-4 mb-6">
+                                <input type="time" value={newPlan.time} onChange={e => setNewPlan({...newPlan, time: e.target.value})} className="flex-1 bg-slate-100 p-4 rounded-2xl font-bold outline-none" />
+                                <select value={newPlan.type} onChange={e => setNewPlan({...newPlan, type: e.target.value})} className="flex-1 bg-slate-100 p-4 rounded-2xl font-bold outline-none">
+                                    <option value="SHARED">全員</option>
+                                    <option value="PERSONAL">個人</option>
+                                </select>
+                            </div>
+                            <button onClick={async () => {
+                                if (!newPlan.title) return;
+                                await db.collection('events').add({
+                                    ...newPlan,
+                                    owner: newPlan.type === 'SHARED' ? 'ALL' : (potatoId || 'Guest'),
+                                    ownerName: user?.displayName || 'Guest',
+                                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                                setShowAddModal(false);
+                                setNewPlan({ time: '12:00', title: '', type: 'SHARED' });
+                            }} className="w-full bg-yellow-400 p-5 rounded-2xl font-black shadow-lg">ADD TO TRIP</button>
+                        </div>
+                    </div>
+                )}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                <button onClick={() => setShowAddModal(true)} className="absolute bottom-28 right-6 w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-90 transition-transform"><i data-lucide="plus" size={32}></i></button>
+
+                <nav className="bg-white border-t-2 border-slate-100 flex justify-around p-4 pb-10 shadow-inner z-10">
+                    <button onClick={() => setActiveTab('Trip')} className={`flex flex-col items-center ${activeTab === 'Trip' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="calendar"></i><span className="text-[9px] mt-1 font-black">TRIP</span></button>
+                    <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center ${activeTab === 'Chat' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="message-square"></i><span className="text-[9px] mt-1 font-black">CHAT</span></button>
+                    <button onClick={() => setActiveTab('ID')} className={`flex flex-col items-center ${activeTab === 'ID' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="user"></i><span className="text-[9px] mt-1 font-black">ID</span></button>
+                </nav>
+            </div>
+        );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+</script>
