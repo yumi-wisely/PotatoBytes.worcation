@@ -3,12 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PotatoPlan</title>
+    <title>PotatoPlanning</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap');
         .logo-font { font-family: 'Dela Gothic One', cursive; }
@@ -21,8 +25,193 @@
         const { useState, useEffect } = React;
 
         const App = () => {
+            const { useState, useEffect } = React;
+
+        // --- ⚠️ ここにあなたのFirebase設定を貼り付けます ⚠️ ---
+        // (後ほどFirebaseコンソールからコピーしてきます)
+        const firebaseConfig = {
+          apiKey: "YOUR_API_KEY",
+          authDomain: "YOUR_AUTH_DOMAIN",
+          projectId: "YOUR_PROJECT_ID",
+          storageBucket: "YOUR_STORAGE_BUCKET",
+          messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+          appId: "YOUR_APP_ID"
+        };
+        // --------------------------------------------------
+
+        // Firebase初期化
+        if (!firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        const App = () => {
             const [activeTab, setActiveTab] = useState('My Trip');
-            const [visibleMembers, setVisibleMembers] = useState(['ALL', 'Yuki', 'Ken', 'Mika']);
+            const [visibleMembers, setVisibleMembers] = useState(['ALL', 'Member1', 'Member2']);
+            const [user, setUser] = useState(null); // ログインユーザー情報
+            const [potatoId, setPotatoId] = useState(null); // 発行されたPotato ID
+
+            // ログイン状態の監視
+            useEffect(() => {
+              const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                if (user) {
+                  setUser(user);
+                  // FirestoreからPotato IDを取得
+                  const userDoc = await db.collection('users').doc(user.uid).get();
+                  if (userDoc.exists()) {
+                    setPotatoId(userDoc.data().potatoId);
+                  }
+                } else {
+                  setUser(null);
+                  setPotatoId(null);
+                }
+              });
+              return () => unsubscribe();
+            }, []);
+
+            // アイコン再描画 & QRコード生成
+            useEffect(() => {
+                lucide.createIcons();
+                if (activeTab === 'Profile' && potatoId) {
+                  const qrContainer = document.getElementById('qrcode');
+                  if (qrContainer) {
+                    qrContainer.innerHTML = ''; // クリア
+                    new QRCode(qrContainer, {
+                      text: potatoId,
+                      width: 128,
+                      height: 128,
+                      colorDark : "#000000",
+                      colorLight : "#ffffff",
+                      correctLevel : QRCode.CorrectLevel.H
+                    });
+                  }
+                }
+            }, [activeTab, potatoId]);
+
+            // Googleログイン & Potato ID発行
+            const signIn = async () => {
+              const provider = new firebase.auth.GoogleAuthProvider();
+              try {
+                const result = await auth.signInWithPopup(provider);
+                const user = result.user;
+
+                // 初回ログインか確認
+                const userRef = db.collection('users').doc(user.uid);
+                const userDoc = await userRef.get();
+
+                if (!userDoc.exists()) {
+                  // Potato IDを新規発行 (PBID-XXXXXXX)
+                  const newPotatoId = 'PBID-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+                  await userRef.set({
+                    displayName: user.displayName,
+                    email: user.email,
+                    potatoId: newPotatoId,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                  });
+                  setPotatoId(newPotatoId);
+                }
+              } catch (error) {
+                console.error("Login Error:", error);
+                alert("ログインに失敗しました。Firebaseの設定を確認してください。");
+              }
+            };
+
+            const members = [
+                { id: 'ALL', name: '全員' },
+                { id: 'Member1', name: '名前1' },
+                { id: 'Member2', name: '名前2' },
+                // ...残りのメンバー
+            ];
+
+            const events = [
+                { time: '09:00', title: '朝市の朝食', type: 'SHARED', owner: 'ALL' },
+                { time: '13:00', title: 'コワーキングタイム', type: 'SHARED', owner: 'ALL' },
+            ];
+
+            return (
+                <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden font-sans">
+                    {/* Header */}
+                    <header className="bg-yellow-400 p-6 text-slate-800 shadow-sm">
+                        <h1 className="text-3xl logo-font tracking-tighter">PotatoPlan</h1>
+                        <div className="mt-2 text-center text-xs font-bold bg-white/50 rounded-full py-1">
+                             函館ワーケーション Day 1
+                        </div>
+                    </header>
+
+                    {/* Timeline & Profile Views */}
+                    <main className="flex-1 overflow-y-auto bg-white">
+                        {activeTab === 'Profile' ? (
+                            // --- ID発行画面 (Profileタブ) ---
+                            <div className="p-8 flex flex-col items-center space-y-6">
+                                <h2 className="text-xl font-bold text-slate-800">My Potato ID</h2>
+                                {user ? (
+                                    // ログイン済み：IDとQRコードを表示
+                                    <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 shadow-inner w-full flex flex-col items-center">
+                                        <img src={user.photoURL} alt="avatar" className="w-16 h-16 rounded-full mb-4 border-2 border-white shadow-md"/>
+                                        <p className="text-sm font-bold text-slate-700">{user.displayName}</p>
+                                        <p className="text-xs text-slate-500 mb-6">{user.email}</p>
+                                        
+                                        {potatoId ? (
+                                            <>
+                                                <div id="qrcode" className="p-2 bg-white rounded-xl shadow-md mb-4"></div>
+                                                <p className="text-xl font-black text-slate-800 tracking-wider logo-font">{potatoId}</p>
+                                                <button onClick={() => navigator.clipboard.writeText(potatoId)} className="text-[10px] mt-1 text-blue-500 font-bold">IDをコピー</button>
+                                            </>
+                                        ) : (
+                                            <p className="text-sm text-slate-500">ID発行中...</p>
+                                        )}
+                                        <button onClick={() => auth.signOut()} className="mt-8 text-xs text-slate-400 underline">ログアウト</button>
+                                    </div>
+                                ) : (
+                                    // 未ログイン：Googleログインボタンを表示
+                                    <div className="text-center py-20 flex flex-col items-center space-y-6">
+                                        <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                                            <i data-lucide="user" size={40}></i>
+                                        </div>
+                                        <p className="text-sm text-slate-500 max-w-xs">Potato IDを発行するには、Googleアカウントでログインしてください。</p>
+                                        <button onClick={signIn} className="bg-white border border-slate-300 text-slate-700 px-6 py-3 rounded-full font-bold shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow">
+                                            <img src="https://authjs.dev/img/providers/google.svg" alt="Google" className="w-5 h-5"/>
+                                            Googleでログイン
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            // --- タイムライン画面 (その他のタブ) ---
+                            <>
+                                {/* Member Tabs */}
+                                <div className="flex gap-4 p-4 overflow-x-auto border-b bg-slate-50 sticky top-0 z-10">
+                                    {members.map(m => (
+                                        <div key={m.id} 
+                                             onClick={() => m.id !== 'ALL' && setVisibleMembers(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
+                                             className={`cursor-pointer flex flex-col items-center min-w-[60px] p-2 rounded-xl transition-all ${visibleMembers.includes(m.id) ? 'bg-white shadow-md ring-2 ring-yellow-400' : 'opacity-40'}`}>
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold mb-1 ${m.id === 'ALL' ? 'bg-slate-800' : 'bg-blue-400'}`}>
+                                                {m.name}
+                                            </div>
+                                            <span className="text-[10px] font-bold">{m.name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* Timeline content (略) */}
+                                <div className="p-6">Timeline is here... (Skip for code brevity)</div>
+                            </>
+                        )}
+                    </main>
+
+                    {/* Bottom Nav */}
+                    <nav className="bg-white border-t flex justify-around p-4 pb-8">
+                        <button onClick={() => setActiveTab('My Trip')} className={`flex flex-col items-center ${activeTab === 'My Trip' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="calendar"></i><span className="text-[10px] mt-1 font-bold">Trip</span></button>
+                        <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center ${activeTab === 'Chat' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="message-square"></i><span className="text-[10px] mt-1 font-bold">Chat</span></button>
+                        <button onClick={() => setActiveTab('Map')} className={`flex flex-col items-center ${activeTab === 'Map' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="map-pin"></i><span className="text-[10px] mt-1 font-bold">Map</span></button>
+                        <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center ${activeTab === 'Profile' ? 'text-yellow-600' : 'text-slate-400'}`}><i data-lucide="user"></i><span className="text-[10px] mt-1 font-bold">ID</span></button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
 
             // アイコンを強制的に再描画するおまじない
             useEffect(() => {
