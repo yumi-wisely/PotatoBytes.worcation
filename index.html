@@ -16,10 +16,8 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap');
         .logo-font { font-family: 'Dela Gothic One', cursive; }
-        body { background-color: #f1f5f9; -webkit-tap-highlight-color: transparent; }
+        body { background-color: #f8fafc; margin: 0; padding: 0; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        @keyframes bounce-in { 0% { transform: translateY(100%); } 100% { transform: translateY(0); } }
-        .animate-bounce-in { animation: bounce-in 0.3s ease-out; }
     </style>
 </head>
 <body>
@@ -55,10 +53,10 @@
             const [showSummonModal, setShowSummonModal] = useState(false);
             const [summonId, setSummonId] = useState('');
             const [newPlan, setNewPlan] = useState({ time: '12:00', title: '', type: 'SHARED' });
-            const [selectedEventId, setSelectedEventId] = useState(null);
+            const [selectedId, setSelectedId] = useState(null);
 
             useEffect(() => {
-                const unsubscribe = auth.onAuthStateChanged(async (u) => {
+                const unsub = auth.onAuthStateChanged(async (u) => {
                     if (u) {
                         setUser(u);
                         const doc = await db.collection('users').doc(u.uid).get();
@@ -67,11 +65,10 @@
                             setPotatoId(d.potatoId);
                             const me = { id: d.potatoId, name: u.displayName, photo: u.photoURL };
                             setTripMembers(p => p.find(m => m.id === me.id) ? p : [...p, me]);
-                            setVisibleMembers(p => p.includes(me.id) ? p : [...p, me.id]);
                         }
-                    } else { setUser(null); setPotatoId(null); setView('TripList'); }
+                    } else { setView('TripList'); }
                 });
-                return () => unsubscribe();
+                return () => unsub();
             }, []);
 
             useEffect(() => {
@@ -86,43 +83,156 @@
             useEffect(() => {
                 if (activeTab === 'ID' && potatoId) {
                     const el = document.getElementById('qrcode');
-                    if (el) { el.innerHTML = ''; new QRCode(el, { text: potatoId, width: 140, height: 140 }); }
+                    if (el) { el.innerHTML = ''; new QRCode(el, { text: potatoId, width: 128, height: 128 }); }
                 }
-                lucide.createIcons();
-            }, [view, activeTab, potatoId, showSummonModal, showAddModal, friends, tripMembers, events, selectedEventId]);
+                if (window.lucide) window.lucide.createIcons();
+            });
 
-            const handleAddFriend = async () => {
+            const addFriend = async () => {
                 if (!summonId) return;
                 const s = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
-                if (s.empty) { alert("ポテト不在🍟"); return; }
+                if (s.empty) { alert("見つかりません🍟"); return; }
                 const f = s.docs.data();
                 setFriends(p => p.find(x => x.id === f.potatoId) ? p : [...p, { id: f.potatoId, name: f.displayName, photo: f.photoURL }]);
                 setSummonId('');
             };
 
-            const handleDeleteEvent = async (id) => {
-                if (confirm("この予定を削除しますか？")) {
-                    await db.collection('events').doc(id).delete();
-                    setSelectedEventId(null);
-                }
-            };
-
             if (view === 'TripList') {
                 return (
-                    <div className="max-w-md mx-auto h-screen p-6 bg-slate-50 overflow-y-auto pb-20">
-                        <h1 className="text-4xl logo-font mb-8 mt-10 text-slate-800">My Trips</h1>
-                        <div className="bg-yellow-400 p-8 rounded-[32px] shadow-lg mb-10 cursor-pointer border-b-8 border-yellow-600 active:translate-y-1 active:border-b-0" onClick={() => setView('MainApp')}>
-                            <h3 className="text-2xl font-black uppercase italic">HAKODATE</h3>
-                            <p className="text-xs font-bold opacity-60">MEMBERS: {tripMembers.length-1} Potatoes</p>
+                    <div className="max-w-md mx-auto min-h-screen bg-slate-50 p-6 pb-24">
+                        <h1 className="text-3xl logo-font mb-6 mt-6">My Trips</h1>
+                        <div className="bg-yellow-400 p-6 rounded-3xl shadow-md mb-8 cursor-pointer active:scale-95 transition-all" onClick={() => setView('MainApp')}>
+                            <h3 className="text-xl font-black uppercase">函館 Worcation</h3>
+                            <p className="text-xs font-bold opacity-60">MEMBERS: {tripMembers.length-1}人</p>
                         </div>
-                        <h2 className="text-xl font-black mb-4">🤝 POTATO FRIENDS</h2>
+                        <h2 className="text-lg font-black mb-4">🤝 FRIENDS</h2>
                         <div className="space-y-3">
                             {friends.map(f => (
-                                <div key={f.id} className="bg-white p-4 rounded-2xl flex items-center justify-between shadow-sm border">
-                                    <div className="flex items-center gap-3"><img src={f.photo} className="w-10 h-10 rounded-full border"/><span className="font-bold">{f.name}</span></div>
-                                    <span className="text-[10px] font-mono bg-slate-100 p-1 rounded">{f.id}</span>
+                                <div key={f.id} className="bg-white p-3 rounded-xl flex items-center justify-between border shadow-sm">
+                                    <div className="flex items-center gap-3">
+                                        <img src={f.photo} className="w-8 h-8 rounded-full border" />
+                                        <span className="font-bold text-sm">{f.name}</span>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-slate-400">{f.id}</span>
                                 </div>
                             ))}
-                            <div className="flex gap-2 mt-4 pt-4 border-t">
-                                <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-bold text-sm" />
-                                <button onClick={handleAddFriend} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs">追加</button>
+                            <div className="flex gap-2 pt-2">
+                                <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border p-3 rounded-xl text-sm uppercase font-bold" />
+                                <button onClick={addFriend} className="bg-slate-900 text-white px-4 rounded-xl text-xs font-bold">追加</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen bg-white flex flex-col shadow-2xl relative overflow-hidden">
+                    <header className="bg-yellow-400 p-5 flex items-center justify-between shadow-sm">
+                        <button onClick={() => setView('TripList')}><i data-lucide="chevron-left"></i></button>
+                        <h1 className="text-xl logo-font uppercase">Hakodate</h1>
+                        <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-3 py-1 rounded-full font-black">召喚</button>
+                    </header>
+
+                    <main className="flex-1 overflow-y-auto pb-24" onClick={() => setSelectedId(null)}>
+                        {activeTab === 'ID' ? (
+                            <div className="p-8 flex flex-col items-center">
+                                <h2 className="text-lg font-black mb-6 uppercase tracking-widest text-slate-400">Profile</h2>
+                                {user ? (
+                                    <div className="bg-yellow-50 p-8 rounded-3xl border border-yellow-200 w-full flex flex-col items-center shadow-inner">
+                                        <img src={user.photoURL} className="w-16 h-16 rounded-full mb-4 border-2 border-white shadow-sm"/>
+                                        <p className="font-black text-slate-700">{user.displayName}</p>
+                                        <div id="qrcode" className="p-2 bg-white rounded-xl my-6"></div>
+                                        <p className="text-xl font-black logo-font text-slate-800">{potatoId}</p>
+                                        <button onClick={() => auth.signOut()} className="mt-8 text-[10px] text-slate-400 underline uppercase">Logout</button>
+                                    </div>
+                                ) : (
+                                    <button onClick={() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())} className="bg-slate-900 text-white px-8 py-4 rounded-full font-black shadow-lg">LOGIN</button>
+                                )}
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex gap-3 p-4 overflow-x-auto border-b bg-slate-50 sticky top-0 z-10 no-scrollbar">
+                                    {tripMembers.map(m => (
+                                        <div key={m.id} onClick={() => m.id !== 'ALL' && setVisibleMembers(p => p.includes(m.id) ? p.filter(x => x !== m.id) : [...p, m.id])}
+                                             className={`cursor-pointer flex flex-col items-center min-w-[60px] p-2 rounded-xl transition-all ${visibleMembers.includes(m.id) ? 'bg-white shadow ring-2 ring-yellow-400' : 'opacity-30'}`}>
+                                            {m.photo ? <img src={m.photo} className="w-10 h-10 rounded-full mb-1" /> : <div className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-black">ALL</div>}
+                                            <span className="text-[10px] font-bold text-slate-500 truncate w-full text-center">{m.name ? m.name.split(' ') : '...'}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-6 border-l-2 border-yellow-100 ml-8 space-y-8 mt-4">
+                                    {events.filter(e => visibleMembers.includes(e.owner)).map((e, i) => (
+                                        <div key={i} className="relative" onClick={(ev) => { ev.stopPropagation(); setSelectedId(selectedId === e.id ? null : e.id); }}>
+                                            <div className={`absolute -left-[33px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${e.type === 'SHARED' ? 'bg-yellow-400' : 'bg-blue-400'}`}></div>
+                                            <div className="text-[10px] font-black text-slate-300 mb-1">{e.time}</div>
+                                            <div className={`p-4 rounded-2xl shadow-sm border transition-all ${selectedId === e.id ? 'ring-2 ring-red-400' : 'border-slate-100'} ${e.type === 'SHARED' ? 'bg-slate-50' : 'bg-blue-50'}`}>
+                                                <div className="flex justify-between items-start text-sm font-bold text-slate-700">
+                                                    {e.title}
+                                                    {selectedId === e.id && (
+                                                        <button onClick={async () => { if(confirm("消す？")) await db.collection('events').doc(e.id).delete(); }} className="text-red-400"><i data-lucide="trash-2" size={16}></i></button>
+                                                    )}
+                                                </div>
+                                                <div className="text-[8px] text-slate-400 uppercase mt-1">{e.ownerName}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </main>
+
+                    {showSummonModal && (
+                        <div className="absolute inset-0 bg-slate-900/60 z- flex items-center justify-center p-6 backdrop-blur-sm">
+                            <div className="w-full bg-white rounded-3xl p-6 shadow-2xl">
+                                <h2 className="text-lg font-black mb-4 uppercase">召喚</h2>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {friends.map(f => (
+                                        <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ? p : [...p, f]); setShowSummonModal(false); }} className="bg-slate-50 p-3 rounded-xl flex items-center gap-3 border active:bg-yellow-50 cursor-pointer">
+                                            <img src={f.photo} className="w-8 h-8 rounded-full" />
+                                            <div className="font-bold text-sm">{f.name}</div>
+                                        </div>
+                                    ))}
+                                    {friends.length === 0 && <p className="text-center py-4 text-xs text-slate-400">Topで仲間を追加してね🍟</p>}
+                                </div>
+                                <button onClick={() => setShowSummonModal(false)} className="mt-4 w-full text-center text-xs font-bold text-slate-300">CLOSE</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddModal && (
+                        <div className="absolute inset-0 bg-slate-900/60 z-50 flex items-end">
+                            <div className="w-full bg-white rounded-t-3xl p-6">
+                                <h2 className="text-lg font-black uppercase mb-4">New Plan</h2>
+                                <input type="text" value={newPlan.title} onChange={x => setNewPlan({...newPlan, title: x.target.value})} className="w-full bg-slate-100 p-4 rounded-xl mb-4 font-bold outline-none" placeholder="予定..." />
+                                <div className="flex gap-4 mb-6">
+                                    <input type="time" value={newPlan.time} onChange={x => setNewPlan({...newPlan, time: x.target.value})} className="flex-1 bg-slate-100 p-4 rounded-xl font-bold" />
+                                    <select value={newPlan.type} onChange={x => setNewPlan({...newPlan, type: x.target.value})} className="flex-1 bg-slate-100 p-4 rounded-xl font-bold">
+                                        <option value="SHARED">全員</option><option value="PERSONAL">個人</option>
+                                    </select>
+                                </div>
+                                <button onClick={async () => {
+                                    if (!newPlan.title) return;
+                                    await db.collection('events').add({ ...newPlan, owner: newPlan.type === 'SHARED' ? 'ALL' : (potatoId || 'Guest'), ownerName: user?.displayName || 'Guest' });
+                                    setShowAddModal(false);
+                                    setNewPlan({ time: '12:00', title: '', type: 'SHARED' });
+                                }} className="w-full bg-yellow-400 p-4 rounded-xl font-black shadow-lg">ADD PLAN</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'Trip' && (
+                        <button onClick={() => setShowAddModal(true)} className="absolute bottom-24 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-xl flex items-center justify-center z-20 active:scale-90 transition-all font-black text-2xl">+</button>
+                    )}
+
+                    <nav className="bg-white border-t flex justify-around p-4 pb-8 z-10 shadow-inner">
+                        <button onClick={() => setActiveTab('Trip')} className={`flex flex-col items-center ${activeTab === 'Trip' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="calendar"></i><span className="text-[9px] mt-1 font-black">TRIP</span></button>
+                        <button onClick={() => setActiveTab('ID')} className={`flex flex-col items-center ${activeTab === 'ID' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="user"></i><span className="text-[9px] mt-1 font-black">ID</span></button>
+                    </nav>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
