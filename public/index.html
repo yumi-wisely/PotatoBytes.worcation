@@ -1,12 +1,104 @@
 <!DOCTYPE html>
 <html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PotatoPlan</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PotatoPlan | PotatoBytes</title>
     <script src="https://cdn.tailwindcss.com"></script>
-  </head>
-  <body>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Noto+Sans+JP:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans JP', sans-serif; }
+        .logo-font { font-family: 'Dela Gothic One', cursive; }
+    </style>
+</head>
+<body class="bg-slate-100">
     <div id="root"></div>
-  </body>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState } = React;
+        const { Calendar, MessageSquare, MapPin, User, CheckCircle, QrCode, Plus } = lucide;
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('My Trip');
+            const [visibleMembers, setVisibleMembers] = useState(['ALL', 'Yuki', 'Ken', 'Mika']);
+
+            const members = [
+                { id: 'ALL', name: '全員' },
+                { id: 'Yuki', name: 'Yuki' },
+                { id: 'Ken', name: 'Ken' },
+                { id: 'Mika', name: 'Mika' },
+            ];
+
+            const events = [
+                { time: '09:00', title: '朝市の朝食', type: 'SHARED', owner: 'ALL' },
+                { time: '10:30', title: '集中作業タイム', type: 'PERSONAL', owner: 'Yuki' },
+                { time: '10:30', title: 'クライアントMTG', type: 'PERSONAL', owner: 'Ken' },
+                { time: '13:00', title: 'シーサイド・コワーキング', type: 'SHARED', owner: 'ALL' },
+            ];
+
+            return (
+                <div className="max-w-md mx-auto h-screen bg-slate-50 flex flex-col shadow-2xl relative border-x border-slate-200">
+                    <header className="bg-yellow-500 p-4 text-slate-800 shadow-sm">
+                        <div className="flex justify-between items-center">
+                            <h1 className="text-2xl logo-font tracking-tighter">PotatoPlan</h1>
+                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-inner">
+                                <User size={20} />
+                            </div>
+                        </div>
+                        <p className="text-center mt-2 font-bold text-sm bg-white/30 rounded-full py-1">函館ワーケーション Day 1</p>
+                    </header>
+
+                    <div className="flex gap-3 p-4 overflow-x-auto bg-white border-b sticky top-0 z-10">
+                        {members.map(m => (
+                            <button key={m.id} onClick={() => m.id !== 'ALL' && setVisibleMembers(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
+                                className={`flex flex-col items-center min-w-[65px] p-2 rounded-xl transition-all ${visibleMembers.includes(m.id) ? 'bg-yellow-100 ring-2 ring-yellow-400' : 'bg-slate-50 opacity-50'}`}>
+                                <div className={`w-10 h-10 rounded-full mb-1 flex items-center justify-center text-white font-bold ${m.id === 'ALL' ? 'bg-slate-800' : 'bg-blue-400'}`}>
+                                    {m.name}
+                                </div>
+                                <span className="text-[10px] font-bold">{m.name}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <main className="flex-1 overflow-y-auto p-6">
+                        <div className="relative border-l-2 border-yellow-200 ml-2 pl-6">
+                            {events.filter(e => visibleMembers.includes(e.owner)).map((event, i) => (
+                                <div key={i} className="mb-8 relative">
+                                    <div className="absolute -left-[33px] top-1 w-4 h-4 rounded-full bg-yellow-400 border-4 border-white shadow-sm"></div>
+                                    <div className="text-xs font-black text-slate-400 mb-1 tracking-widest">{event.time}</div>
+                                    <div className={`p-4 rounded-2xl shadow-sm border-b-4 ${event.type === 'SHARED' ? 'bg-green-50 border-green-400' : 'bg-white border-blue-400'}`}>
+                                        <div className="flex justify-between items-start">
+                                            <span className="font-bold text-slate-800">{event.title}</span>
+                                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-200 font-black">{event.type}</span>
+                                        </div>
+                                        {event.owner !== 'ALL' && <div className="text-[10px] mt-2 text-blue-500 font-bold">👤 {event.owner}</div>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </main>
+
+                    <nav className="bg-white border-t flex justify-around p-4 pb-8">
+                        <button onClick={() => setActiveTab('My Trip')} className={`flex flex-col items-center ${activeTab === 'My Trip' ? 'text-yellow-600' : 'text-slate-400'}`}><Calendar size={24} /><span className="text-[10px] mt-1 font-bold">My Trip</span></button>
+                        <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center ${activeTab === 'Chat' ? 'text-yellow-600' : 'text-slate-400'}`}><MessageSquare size={24} /><span className="text-[10px] mt-1 font-bold">Chat</span></button>
+                        <button onClick={() => setActiveTab('Map')} className={`flex flex-col items-center ${activeTab === 'Map' ? 'text-yellow-600' : 'text-slate-400'}`}><MapPin size={24} /><span className="text-[10px] mt-1 font-bold">Map</span></button>
+                        <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center ${activeTab === 'Profile' ? 'text-yellow-600' : 'text-slate-400'}`}><QrCode size={24} /><span className="text-[10px] mt-1 font-bold">Profile</span></button>
+                    </nav>
+
+                    <button className="absolute bottom-24 right-6 w-14 h-14 bg-slate-800 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform">
+                        <Plus size={28} />
+                    </button>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
 </html>
