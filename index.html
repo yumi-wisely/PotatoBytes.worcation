@@ -26,7 +26,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect } = React;
 
         const firebaseConfig = {
           apiKey: "AIzaSyCcRLNQUUqgoIeLrudKJ9IsClwuc93WwHM",
@@ -41,6 +41,28 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
+
+        const QRCodeDisplay = ({ text }) => {
+            const qrRef = React.useRef(null);
+            useEffect(() => {
+                if (qrRef.current && text) {
+                    qrRef.current.innerHTML = '';
+                    new QRCode(qrRef.current, { text, width: 140, height: 140 });
+                }
+            }, [text]);
+            return <div ref={qrRef} className="p-4 bg-white rounded-3xl my-6 border border-yellow-100 min-w-[172px] min-h-[172px] flex items-center justify-center shadow-inner relative z-10"></div>;
+        };
+
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const ref = React.useRef(null);
+            useEffect(() => {
+                if (ref.current && window.lucide) {
+                    ref.current.innerHTML = `<i data-lucide="${name}" class="${className}" style="width: ${size}px; height: ${size}px;"></i>`;
+                    window.lucide.createIcons({ root: ref.current });
+                }
+            }, [name, size, className]);
+            return <span ref={ref} className="inline-flex items-center justify-center"></span>;
+        };
 
         const App = () => {
             const [view, setView] = useState('TripList');
@@ -61,51 +83,48 @@
             const [newTrip, setNewTrip] = useState({ title: '', start: '', end: '', invited: [] });
             const [selectedId, setSelectedId] = useState(null);
 
+            // ログイン監視
             useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
                     if (u) {
                         setUser(u);
                         const doc = await db.collection('users').doc(u.uid).get();
-                        if (doc.exists()) setPotatoId(doc.data().potatoId);
+                        if (doc.exists()) {
+                            setPotatoId(doc.data().potatoId);
+                        }
+                        // Trip一覧を監視
                         db.collection('trips').orderBy('createdAt', 'desc').onSnapshot(s => {
                             setTrips(s.docs.map(d => ({ id: d.id, ...d.data() })));
                         });
-                    } else { setView('TripList'); setTopTab('Me'); }
+                    } else {
+                        setUser(null); setPotatoId(null); setTopTab('Me');
+                    }
                 });
                 return () => unsub();
             }, []);
 
+            // 予定の監視 (Optimized)
             useEffect(() => {
-                if (view === 'MainApp' && currentTrip) {
+                if (currentTrip && currentTrip.id) {
                     const unsub = db.collection('trips').doc(currentTrip.id).collection('events').orderBy('time').onSnapshot(s => {
                         setEvents(s.docs.map(d => ({ id: d.id, ...d.data() })));
                     });
                     return () => unsub();
+                } else {
+                    setEvents([]);
                 }
-            }, [view, currentTrip]);
-
-            // 【超重要】QRコードとアイコンの描画を徹底的に安定化
-            useEffect(() => {
-                const drawQR = () => {
-                    if (view === 'TripList' && topTab === 'Me' && potatoId && typeof QRCode !== 'undefined') {
-                        const el = document.getElementById('qrcode-box');
-                        if (el) {
-                            el.innerHTML = '';
-                            new QRCode(el, { text: potatoId, width: 140, height: 140, colorDark: "#1e293b" });
-                        }
-                    }
-                };
-                
-                const timer = setTimeout(drawQR, 500); // 描画までの猶予をしっかり確保
-                if (window.lucide) window.lucide.createIcons();
-                return () => clearTimeout(timer);
-            }, [view, topTab, potatoId, showNewTripModal, showSummonModal, showAddModal, trips, events]);
+            }, [currentTrip?.id]);
 
             const handleCreateTrip = async () => {
                 if (!newTrip.title || !newTrip.start || !newTrip.end) return;
-                const m = [{ id: potatoId, name: user.displayName, photo: user.photoURL }, ...newTrip.invited];
-                await db.collection('trips').add({ ...newTrip, members: m, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-                setShowNewTripModal(false); setNewTrip({ title: '', start: '', end: '', invited: [] });
+                const members = [{ id: potatoId, name: user.displayName, photo: user.photoURL }, ...newTrip.invited];
+                await db.collection('trips').add({
+                    ...newTrip,
+                    members,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                setShowNewTripModal(false);
+                setNewTrip({ title: '', start: '', end: '', invited: [] });
             };
 
             const getDates = (s, e) => {
@@ -114,81 +133,69 @@
                 return d;
             };
 
-            if (view === 'TripList') {
-                return (
-                    <div className="max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl">
-                        <header className="bg-yellow-400 p-8 pt-10 text-center shadow-sm shrink-0">
+            return (
+                <div className="max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden">
+                    {/* Sliding Wrap */}
+                    <div className={`flex w-[200%] h-full transition-transform duration-500 ease-in-out ${view === 'TripList' ? 'translate-x-0' : '-translate-x-1/2'}`}>
+                        
+                        {/* VIEW: TripList */}
+                        <div className="w-1/2 h-full flex flex-col relative">
+                            <header className="bg-yellow-400 p-8 pt-10 text-center shadow-sm shrink-0 relative z-10">
                             <h1 className="text-3xl logo-font text-slate-900 tracking-tighter italic uppercase">PotatoPlan</h1>
                         </header>
                         <main className="flex-1 overflow-y-auto p-6 pb-28">
                             {topTab === 'Trips' && (
                                 <div className="space-y-4 animate-in">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h2 className="text-lg font-black italic uppercase text-slate-400">My Trips</h2>
-                                        <button onClick={() => setShowNewTripModal(true)} className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 font-black">+</button>
+                                    <div className="flex justify-between items-center">
+                                        <h2 className="text-lg font-black italic text-slate-400 uppercase">My Trips</h2>
+                                        <button onClick={() => setShowNewTripModal(true)} className="w-10 h-10 bg-slate-900 text-white rounded-full font-black shadow-lg">+</button>
                                     </div>
                                     {trips.map(t => (
-                                        <div key={t.id} className="bg-yellow-400 p-8 rounded-[40px] shadow-lg border-b-8 border-yellow-600 active:translate-y-1 active:border-b-0 cursor-pointer mb-6" 
-                                             onClick={() => { setCurrentTrip(t); setTripMembers(t.members || []); setView('MainApp'); setNewPlan({...newPlan, date: t.start}); }}>
-                                            <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">{t.title}</h3>
-                                            <p className="text-[10px] font-bold opacity-60 mt-2 uppercase tracking-widest">{t.start} - {t.end}</p>
+                                        <div key={t.id} onClick={() => { setCurrentTrip(t); setTripMembers(t.members); setView('MainApp'); setNewPlan({...newPlan, date: t.start}); }}
+                                             className="bg-yellow-400 p-8 rounded-[40px] shadow-lg border-b-8 border-yellow-600 active:translate-y-1 active:border-b-0 cursor-pointer mb-4 transition-all">
+                                            <h3 className="text-2xl font-black uppercase italic tracking-tighter">{t.title}</h3>
+                                            <p className="text-[10px] font-bold opacity-60 uppercase tracking-widest">{t.start} - {t.end}</p>
                                         </div>
                                     ))}
                                 </div>
                             )}
-
                             {topTab === 'Friends' && (
                                 <div className="space-y-4 animate-in">
-                                    <h2 className="text-lg font-black italic uppercase text-slate-400 tracking-widest leading-loose">Potato Friends</h2>
+                                    <h2 className="text-lg font-black italic text-slate-400 uppercase tracking-widest">Friends List</h2>
                                     {friends.map(f => (
                                         <div key={f.id} className="bg-white p-4 rounded-3xl flex items-center justify-between border shadow-sm">
                                             <div className="flex items-center gap-4"><img src={f.photo} className="w-10 h-10 rounded-full border-2 border-white shadow-sm"/><span className="font-black text-slate-700">{f.name}</span></div>
-                                            <span className="text-[10px] font-mono bg-slate-100 px-2 py-1 rounded">{f.id}</span>
+                                            <span className="text-[10px] font-mono bg-slate-100 p-1 rounded">{f.id}</span>
                                         </div>
                                     ))}
                                     <div className="flex gap-2 pt-4 border-t">
-                                        <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-black text-sm outline-none focus:border-yellow-400" />
+                                        <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-black text-sm outline-none" />
                                         <button onClick={async () => {
                                             const s = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
-                                            if (!s.empty) { const f = s.docs.data(); setFriends(p => [...p, {id: f.potatoId, name: f.displayName, photo: f.photoURL}]); setSummonId(''); }
-                                        }} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase shadow-md">追加</button>
+                                            if (!s.empty) { const f = s.docs.data(); setFriends([...friends, {id: f.potatoId, name: f.displayName, photo: f.photoURL}]); setSummonId(''); }
+                                        }} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase">追加</button>
                                     </div>
                                 </div>
                             )}
-
                             {topTab === 'Me' && (
-                                <div className="flex flex-col items-center animate-in w-full">
-                                    <h2 className="text-lg font-black italic uppercase text-slate-400 mb-6 tracking-widest">Personal ID</h2>
+                                <div className="flex flex-col items-center animate-in">
+                                    <h2 className="text-lg font-black italic text-slate-400 mb-6 uppercase tracking-widest text-center">Personal ID</h2>
                                     {user ? (
-                                        <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center shadow-lg relative">
+                                        <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center shadow-lg">
                                             <img src={user.photoURL} className="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-md"/>
                                             <p className="font-black text-lg text-slate-700">{user.displayName}</p>
-                                            
-                                            {/* QRコードの器をしっかり用意 */}
-                                            <div id="qrcode-box" className="p-4 bg-white rounded-3xl my-6 border border-yellow-100 shadow-inner flex items-center justify-center min-w-[172px] min-h-[172px]">
-                                                <div className="animate-pulse text-[8px] font-black text-slate-200 uppercase italic">Potato Generating...</div>
-                                            </div>
-
-                                            {potatoId ? (
-                                                <div className="text-center">
-                                                    <p className="text-2xl font-black logo-font text-slate-800 bg-white px-6 py-2 rounded-xl border-2 border-yellow-200 shadow-sm tracking-widest uppercase">{potatoId}</p>
-                                                </div>
-                                            ) : (
-                                                <div className="w-32 h-8 bg-slate-100 rounded-lg animate-pulse"></div>
-                                            )}
-                                            
-                                            <button onClick={() => auth.signOut()} className="mt-10 text-[10px] text-slate-300 font-bold underline uppercase italic">Logout</button>
+                                            <QRCodeDisplay text={potatoId} />
+                                            <p className="text-2xl font-black logo-font text-slate-800 bg-white px-5 py-2 rounded-xl border-2 border-yellow-200 shadow-sm tracking-widest">{potatoId}</p>
+                                            <button onClick={() => auth.signOut()} className="mt-8 text-[10px] text-slate-300 font-bold underline uppercase italic">Logout</button>
                                         </div>
                                     ) : (
-                                        <button onClick={() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())} className="bg-slate-900 text-white px-10 py-5 rounded-full font-black shadow-xl active:scale-95 transition-all uppercase tracking-widest mt-10">Google Login</button>
+                                        <button onClick={() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())} className="bg-slate-900 text-white px-10 py-5 rounded-full font-black shadow-xl uppercase tracking-widest">Login</button>
                                     )}
                                 </div>
                             )}
                         </main>
-                        
-                        {/* New Trip Modal */}
                         {showNewTripModal && (
-                            <div className="absolute inset-0 bg-slate-900/80 z- flex items-center justify-center p-6 backdrop-blur-md animate-in">
+                            <div className="absolute inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-6 backdrop-blur-md animate-in">
                                 <div className="w-full bg-white rounded-[40px] p-8 shadow-2xl max-h-[90%] flex flex-col overflow-y-auto no-scrollbar">
                                     <h2 className="text-xl font-black italic mb-6 uppercase tracking-widest text-center">New Trip</h2>
                                     <div className="space-y-4">
@@ -197,15 +204,15 @@
                                             <input type="date" value={newTrip.start} onChange={e => setNewTrip({...newTrip, start: e.target.value})} className="flex-1 bg-slate-50 border-2 p-3 rounded-xl font-black text-xs" />
                                             <input type="date" value={newTrip.end} onChange={e => setNewTrip({...newTrip, end: e.target.value})} className="flex-1 bg-slate-50 border-2 p-3 rounded-xl font-black text-xs" />
                                         </div>
-                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2 mt-4">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase mt-4 italic border-b pb-2">Invite Friends</p>
+                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
                                             {friends.map(f => (
                                                 <div key={f.id} onClick={() => {
-                                                    const isInvited = newTrip.invited.some(i => i.id === f.id);
-                                                    setNewTrip({...newTrip, invited: isInvited ? newTrip.invited.filter(i => i.id !== f.id) : [...newTrip.invited, f]});
+                                                    const invited = newTrip.invited.some(i => i.id === f.id);
+                                                    setNewTrip({...newTrip, invited: invited ? newTrip.invited.filter(i => i.id !== f.id) : [...newTrip.invited, f]});
                                                 }} className={`p-4 rounded-[24px] flex items-center gap-3 border-2 transition-all cursor-pointer ${newTrip.invited.some(i => i.id === f.id) ? 'bg-yellow-100 border-yellow-400 shadow-sm' : 'bg-white border-slate-50'}`}>
-                                                    <img src={f.photo} className="w-8 h-8 rounded-full border border-white" />
+                                                    <img src={f.photo} className="w-8 h-8 rounded-full" />
                                                     <span className="text-sm font-black text-slate-700">{f.name}</span>
-                                                    {newTrip.invited.some(i => i.id === f.id) && <i data-lucide="check-circle" className="ml-auto text-yellow-500" size={16}></i>}
                                                 </div>
                                             ))}
                                         </div>
@@ -217,24 +224,20 @@
                                 </div>
                             </div>
                         )}
-
-                        <nav className="absolute bottom-0 left-0 right-0 bg-white border-t p-6 pb-10 flex justify-around shadow-2xl z-20 shrink-0">
-                            <button onClick={() => setTopTab('Trips')} className={`flex flex-col items-center ${topTab === 'Trips' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="map"></i><span className="text-[10px] mt-1 font-black italic">TRIPS</span></button>
-                            <button onClick={() => setTopTab('Friends')} className={`flex flex-col items-center ${topTab === 'Friends' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="users"></i><span className="text-[10px] mt-1 font-black italic">FRIENDS</span></button>
-                            <button onClick={() => setTopTab('Me')} className={`flex flex-col items-center ${topTab === 'Me' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="user"></i><span className="text-[10px] mt-1 font-black italic">ME</span></button>
+                        <nav className="absolute bottom-0 left-0 right-0 bg-white border-t p-6 pb-10 flex justify-around shadow-2xl z-20">
+                            <button onClick={() => setTopTab('Trips')} className={`flex flex-col items-center transition-colors ${topTab === 'Trips' ? 'text-yellow-500' : 'text-slate-200'}`}><Icon name="map" size={24} /><span className="text-[10px] mt-1 font-black italic">TRIPS</span></button>
+                            <button onClick={() => setTopTab('Friends')} className={`flex flex-col items-center transition-colors ${topTab === 'Friends' ? 'text-yellow-500' : 'text-slate-200'}`}><Icon name="users" size={24} /><span className="text-[10px] mt-1 font-black italic">FRIENDS</span></button>
+                            <button onClick={() => setTopTab('Me')} className={`flex flex-col items-center transition-colors ${topTab === 'Me' ? 'text-yellow-500' : 'text-slate-200'}`}><Icon name="user" size={24} /><span className="text-[10px] mt-1 font-black italic">ME</span></button>
                         </nav>
-                    </div>
-                );
-            }
+                        </div>
 
-            // --- MainApp ---
-            return (
-                <div className="max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden animate-in">
-                    <header className="bg-yellow-400 p-6 flex items-center justify-between shadow-sm shrink-0">
-                        <button onClick={() => setView('TripList')} className="p-2 bg-white/40 rounded-full shadow-sm"><i data-lucide="chevron-left"></i></button>
-                        <h1 className="text-xl logo-font uppercase tracking-tighter italic">{currentTrip?.title}</h1>
-                        <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-3 py-2 rounded-full font-black uppercase shadow-lg">召喚</button>
-                    </header>
+                        {/* VIEW: MainApp */}
+                        <div className="w-1/2 h-full flex flex-col relative bg-white">
+                            <header className="bg-yellow-400 p-6 flex items-center justify-between shadow-sm shrink-0">
+                                <button onClick={() => setView('TripList')} className="p-2 bg-white/40 rounded-full active:scale-90 transition-transform"><Icon name="chevron-left" size={24} /></button>
+                                <h1 className="text-xl logo-font uppercase tracking-tighter italic truncate w-48 text-center">{currentTrip?.title || 'Trip'}</h1>
+                                <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-3 py-2 rounded-full font-black uppercase shrink-0">召喚</button>
+                            </header>
                     <main className="flex-1 overflow-hidden flex flex-col" onClick={() => setSelectedId(null)}>
                         <div className="flex gap-4 p-5 overflow-x-auto border-b bg-slate-50 no-scrollbar shadow-inner shrink-0">
                             {tripMembers.map(m => (
@@ -260,7 +263,7 @@
                                                 <div className={`p-6 rounded-[32px] shadow-sm border-2 transition-all ${selectedId === e.id ? 'ring-4 ring-red-400 border-red-100 bg-red-50' : 'border-slate-50 bg-slate-50'}`}>
                                                     <div className="flex justify-between items-start">
                                                         <div className={`text-md font-black italic ${selectedId === e.id ? 'text-red-600' : 'text-slate-700'}`}>{e.title}</div>
-                                                        {selectedId === e.id && <button onClick={async () => { if(confirm("消す？🍟")) await db.collection('trips').doc(currentTrip.id).collection('events').doc(e.id).delete(); }} className="p-2 bg-red-500 text-white rounded-full shadow-lg active:scale-125 transition-transform"><i data-lucide="trash-2" size={16}></i></button>}
+                                                        {selectedId === e.id && <button onClick={async () => { if(confirm("消す？🍟")) await db.collection('trips').doc(currentTrip.id).collection('events').doc(e.id).delete(); }} className="p-2 bg-red-500 text-white rounded-full flex items-center justify-center active:scale-90 transition-transform"><Icon name="trash-2" size={16} /></button>}
                                                     </div>
                                                     <div className="text-[9px] font-bold text-slate-300 uppercase mt-2 tracking-widest italic">{e.ownerName}</div>
                                                 </div>
@@ -271,24 +274,22 @@
                             ))}
                         </div>
                     </main>
-                    {/* Add Plan Modal & Summon Modal (Omitted for brevity but kept in original code) */}
                     {showAddModal && (
                         <div className="absolute inset-0 bg-slate-900/60 z-50 flex items-end">
                             <div className="w-full bg-white rounded-t-[50px] p-10 animate-in shadow-2xl max-h-[90%] overflow-y-auto no-scrollbar pb-10">
-                                <h2 className="text-2xl font-black italic uppercase mb-8 tracking-tighter">New Plan</h2>
+                                <h2 className="text-2xl font-black italic uppercase mb-8">New Plan</h2>
                                 <div className="space-y-4">
                                     <input type="text" value={newPlan.title} onChange={x => setNewPlan({...newPlan, title: x.target.value})} className="w-full bg-slate-100 p-6 rounded-3xl mb-4 font-black outline-none border-4 border-transparent focus:border-yellow-400 transition-all shadow-inner" placeholder="予定は？" />
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Date</label>
-                                        <select value={newPlan.date} onChange={x => setNewPlan({...newPlan, date: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner">
+                                    <div className="flex flex-col gap-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Date</label>
+                                        <select value={newPlan.date} onChange={x => setNewPlan({...newPlan, date: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner border-2 border-slate-50">
                                             {currentTrip && getDates(currentTrip.start, currentTrip.end).map(d => (<option key={d} value={d}>{d}</option>))}
                                         </select>
                                     </div>
                                     <div className="flex gap-4">
-                                        <div className="flex-1 flex flex-col gap-2 text-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic text-slate-300">Time</label>
+                                        <div className="flex-1 flex flex-col gap-2 text-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Time</label>
                                             <input type="time" value={newPlan.time} onChange={x => setNewPlan({...newPlan, time: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner" />
                                         </div>
-                                        <div className="flex-1 flex flex-col gap-2 text-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic text-slate-300">Type</label>
+                                        <div className="flex-1 flex flex-col gap-2 text-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Type</label>
                                             <select value={newPlan.type} onChange={x => setNewPlan({...newPlan, type: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner">
                                                 <option value="SHARED">全員</option><option value="PERSONAL">個人</option>
                                             </select>
@@ -298,7 +299,7 @@
                                         if (!newPlan.title || !newPlan.date) return;
                                         await db.collection('trips').doc(currentTrip.id).collection('events').add({ ...newPlan, owner: newPlan.type === 'SHARED' ? 'ALL' : (potatoId || 'Me'), ownerName: user?.displayName || 'Me', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
                                         setShowAddModal(false); setNewPlan({ ...newPlan, title: '' });
-                                    }} className="w-full bg-yellow-400 p-6 rounded-3xl font-black text-slate-900 shadow-xl active:scale-95 text-lg uppercase tracking-widest mt-6 shadow-yellow-200">ADD TO TRIP</button>
+                                    }} className="w-full bg-yellow-400 p-6 rounded-3xl font-black text-slate-900 shadow-xl active:scale-95 text-lg uppercase tracking-widest mt-6">ADD TO TRIP</button>
                                 </div>
                             </div>
                         </div>
@@ -312,16 +313,18 @@
                                         <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ? p : [...p, f]); setShowSummonModal(false); }} className="bg-slate-50 p-5 rounded-[30px] flex items-center gap-4 active:bg-yellow-50 cursor-pointer shadow-sm">
                                             <img src={f.photo} className="w-10 h-10 rounded-full border shadow-sm" />
                                             <div className="font-black text-slate-700 text-sm">{f.name}</div>
-                                            <i data-lucide="user-plus" className="ml-auto text-slate-300"></i>
+                                            <Icon name="user-plus" className="ml-auto text-slate-300 pointer-events-none" size={20} />
                                         </div>
                                     ))}
-                                    {friends.length === 0 && <p className="text-center py-6 text-[10px] font-black text-slate-300 uppercase">仲間がいません🍟</p>}
+                                    {friends.length === 0 && <p className="text-center py-6 text-[10px] font-black text-slate-300 uppercase leading-loose">仲間がいません🍟<br/>MEタブでIDを確認しよう！</p>}
                                 </div>
-                                <button onClick={() => setShowSummonModal(false)} className="mt-8 font-black text-slate-300 text-[10px] uppercase tracking-widest">CLOSE</button>
+                                <button onClick={() => setShowSummonModal(false)} className="mt-8 font-black text-slate-300 text-[10px] uppercase tracking-widest border-t pt-4">CLOSE</button>
                             </div>
                         </div>
                     )}
-                    <button onClick={() => setShowAddModal(true)} className="absolute bottom-10 right-10 w-20 h-20 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-90 transition-all font-black text-3xl shadow-slate-400 shrink-0">+</button>
+                            <button onClick={() => setShowAddModal(true)} className={`absolute bottom-10 right-10 w-20 h-20 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-90 font-black text-3xl transition-opacity duration-300 ${view === 'MainApp' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>+</button>
+                        </div>
+                    </div>
                 </div>
             );
         };
