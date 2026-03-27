@@ -88,37 +88,40 @@
                 const unsub = auth.onAuthStateChanged(async (u) => {
                     if (u) {
                         setUser(u);
-                        const userRef = db.collection('users').doc(u.uid);
-                        const doc = await userRef.get();
-                        let currentPotatoId = '';
-                        let currentFriends = [];
-                        
-                        if (doc.exists()) {
-                            const data = doc.data();
-                            currentPotatoId = data.potatoId;
-                            currentFriends = data.friends || [];
+                        try {
+                            const userRef = db.collection('users').doc(u.uid);
+                            const doc = await userRef.get();
+                            let currentPotatoId = '';
+                            let currentFriends = [];
+                            
+                            if (doc.exists() && doc.data().potatoId) {
+                                const data = doc.data();
+                                currentPotatoId = data.potatoId;
+                                currentFriends = data.friends || [];
+                            } else {
+                                currentPotatoId = 'PBID-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+                                await userRef.set({
+                                    potatoId: currentPotatoId,
+                                    displayName: u.displayName || 'Potato User',
+                                    photoURL: u.photoURL || '',
+                                    friends: currentFriends,
+                                    createdAt: Date.now()
+                                }, { merge: true });
+                            }
+
                             setPotatoId(currentPotatoId);
                             setFriends(currentFriends);
-                        } else {
-                            currentPotatoId = 'PBID-' + Math.random().toString(36).substr(2, 4).toUpperCase();
-                            await userRef.set({
-                                potatoId: currentPotatoId,
-                                displayName: u.displayName,
-                                photoURL: u.photoURL,
-                                friends: [],
-                                createdAt: Date.now()
-                            });
-                            setPotatoId(currentPotatoId);
-                            setFriends([]);
-                        }
 
-                        // Trip一覧を監視（自分が含まれるTripだけ抽出）
-                        db.collection('trips').where('memberIds', 'array-contains', currentPotatoId).onSnapshot(s => {
-                            const fetchedTrips = s.docs.map(d => ({ id: d.id, ...d.data() }));
-                            const getTime = (t) => t?.toDate ? t.toDate().getTime() : (t || 0);
-                            fetchedTrips.sort((a, b) => getTime(b.createdAt) - getTime(a.createdAt));
-                            setTrips(fetchedTrips);
-                        });
+                            // Trip一覧を監視（自分が含まれるTripだけ抽出）
+                            db.collection('trips').where('memberIds', 'array-contains', currentPotatoId).onSnapshot(s => {
+                                const fetchedTrips = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                                const getTime = (t) => t?.toDate ? t.toDate().getTime() : (t || 0);
+                                fetchedTrips.sort((a, b) => getTime(b.createdAt) - getTime(a.createdAt));
+                                setTrips(fetchedTrips);
+                            }, err => console.error("Trips error:", err));
+                        } catch (err) {
+                            console.error("Auth process error:", err);
+                        }
                     } else {
                         setUser(null); setPotatoId(null); setFriends([]); setTrips([]); setTopTab('Me');
                     }
@@ -140,16 +143,21 @@
 
             const handleCreateTrip = async () => {
                 if (!newTrip.title || !newTrip.start || !newTrip.end) return;
-                const members = [{ id: potatoId, name: user.displayName, photo: user.photoURL }, ...newTrip.invited];
-                const memberIds = members.map(m => m.id);
-                await db.collection('trips').add({
-                    ...newTrip,
-                    members,
-                    memberIds,
-                    createdAt: Date.now() // ローカル更新を即座に反映
-                });
-                setShowNewTripModal(false);
-                setNewTrip({ title: '', start: '', end: '', invited: [] });
+                try {
+                    const members = [{ id: potatoId, name: user.displayName || 'Host', photo: user.photoURL || '' }, ...newTrip.invited];
+                    const memberIds = members.map(m => m.id);
+                    await db.collection('trips').add({
+                        ...newTrip,
+                        members,
+                        memberIds,
+                        createdAt: Date.now() // ローカル更新を即座に反映
+                    });
+                    setShowNewTripModal(false);
+                    setNewTrip({ title: '', start: '', end: '', invited: [] });
+                } catch (err) {
+                    console.error("Trip creation error:", err);
+                    alert("作成に失敗しました: " + err.message);
+                }
             };
 
             const getDates = (s, e) => {
@@ -196,16 +204,25 @@
                                     <div className="flex gap-2 pt-4 border-t">
                                         <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-black text-sm outline-none" />
                                         <button onClick={async () => {
-                                            const s = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
-                                            if (!s.empty) { 
-                                                const f = s.docs[0].data(); 
-                                                const newFriend = {id: f.potatoId, name: f.displayName, photo: f.photoURL};
-                                                const updatedFriends = [...friends, newFriend];
-                                                setFriends(updatedFriends);
-                                                db.collection('users').doc(user.uid).update({ friends: updatedFriends });
-                                                setSummonId(''); 
-                                            } else {
-                                                alert('見つかりません🍟');
+                                            try {
+                                                const s = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
+                                                if (!s.empty) { 
+                                                    const f = s.docs[0].data(); 
+                                                    const newFriend = {id: f.potatoId, name: f.displayName || 'Guest', photo: f.photoURL || ''};
+                                                    // 防止重複
+                                                    if (friends.some(x => x.id === newFriend.id)) {
+                                                        alert('すでに追加されています🍟');
+                                                        return;
+                                                    }
+                                                    const updatedFriends = [...friends, newFriend];
+                                                    setFriends(updatedFriends);
+                                                    await db.collection('users').doc(user.uid).update({ friends: updatedFriends });
+                                                    setSummonId(''); 
+                                                } else {
+                                                    alert('見つかりません🍟');
+                                                }
+                                            } catch (err) {
+                                                console.error("Add friend error:", err);
                                             }
                                         }} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase shrink-0">追加</button>
                                     </div>
