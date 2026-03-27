@@ -83,21 +83,44 @@
             const [newTrip, setNewTrip] = useState({ title: '', start: '', end: '', invited: [] });
             const [selectedId, setSelectedId] = useState(null);
 
-            // ログイン監視
+            // ログイン監視・ユーザー登録・Trip監視
             useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
                     if (u) {
                         setUser(u);
-                        const doc = await db.collection('users').doc(u.uid).get();
+                        const userRef = db.collection('users').doc(u.uid);
+                        const doc = await userRef.get();
+                        let currentPotatoId = '';
+                        let currentFriends = [];
+                        
                         if (doc.exists()) {
-                            setPotatoId(doc.data().potatoId);
+                            const data = doc.data();
+                            currentPotatoId = data.potatoId;
+                            currentFriends = data.friends || [];
+                            setPotatoId(currentPotatoId);
+                            setFriends(currentFriends);
+                        } else {
+                            currentPotatoId = 'PBID-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+                            await userRef.set({
+                                potatoId: currentPotatoId,
+                                displayName: u.displayName,
+                                photoURL: u.photoURL,
+                                friends: [],
+                                createdAt: Date.now()
+                            });
+                            setPotatoId(currentPotatoId);
+                            setFriends([]);
                         }
-                        // Trip一覧を監視
-                        db.collection('trips').orderBy('createdAt', 'desc').onSnapshot(s => {
-                            setTrips(s.docs.map(d => ({ id: d.id, ...d.data() })));
+
+                        // Trip一覧を監視（自分が含まれるTripだけ抽出）
+                        db.collection('trips').where('memberIds', 'array-contains', currentPotatoId).onSnapshot(s => {
+                            const fetchedTrips = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                            const getTime = (t) => t?.toDate ? t.toDate().getTime() : (t || 0);
+                            fetchedTrips.sort((a, b) => getTime(b.createdAt) - getTime(a.createdAt));
+                            setTrips(fetchedTrips);
                         });
                     } else {
-                        setUser(null); setPotatoId(null); setTopTab('Me');
+                        setUser(null); setPotatoId(null); setFriends([]); setTrips([]); setTopTab('Me');
                     }
                 });
                 return () => unsub();
@@ -118,10 +141,12 @@
             const handleCreateTrip = async () => {
                 if (!newTrip.title || !newTrip.start || !newTrip.end) return;
                 const members = [{ id: potatoId, name: user.displayName, photo: user.photoURL }, ...newTrip.invited];
+                const memberIds = members.map(m => m.id);
                 await db.collection('trips').add({
                     ...newTrip,
                     members,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    memberIds,
+                    createdAt: Date.now() // ローカル更新を即座に反映
                 });
                 setShowNewTripModal(false);
                 setNewTrip({ title: '', start: '', end: '', invited: [] });
@@ -172,8 +197,17 @@
                                         <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-black text-sm outline-none" />
                                         <button onClick={async () => {
                                             const s = await db.collection('users').where('potatoId', '==', summonId.toUpperCase()).get();
-                                            if (!s.empty) { const f = s.docs.data(); setFriends([...friends, {id: f.potatoId, name: f.displayName, photo: f.photoURL}]); setSummonId(''); }
-                                        }} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase">追加</button>
+                                            if (!s.empty) { 
+                                                const f = s.docs[0].data(); 
+                                                const newFriend = {id: f.potatoId, name: f.displayName, photo: f.photoURL};
+                                                const updatedFriends = [...friends, newFriend];
+                                                setFriends(updatedFriends);
+                                                db.collection('users').doc(user.uid).update({ friends: updatedFriends });
+                                                setSummonId(''); 
+                                            } else {
+                                                alert('見つかりません🍟');
+                                            }
+                                        }} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase shrink-0">追加</button>
                                     </div>
                                 </div>
                             )}
