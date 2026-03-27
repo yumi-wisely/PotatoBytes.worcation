@@ -18,13 +18,15 @@
         .logo-font { font-family: 'Dela Gothic One', cursive; }
         body { background-color: #f8fafc; margin: 0; padding: 0; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        @keyframes bounce-in { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .animate-in { animation: bounce-in 0.2s ease-out forwards; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         const firebaseConfig = {
           apiKey: "AIzaSyCcRLNQUUqgoIeLrudKJ9IsClwuc93WwHM",
@@ -41,18 +43,24 @@
         const db = firebase.firestore();
 
         const App = () => {
-            const [view, setView] = useState('TripList'); // TripList or MainApp
-            const [topTab, setTopTab] = useState('Trips'); // Trips or Friends or Me (Profile)
+            const [view, setView] = useState('TripList');
+            const [topTab, setTopTab] = useState('Trips');
             const [user, setUser] = useState(null);
             const [potatoId, setPotatoId] = useState(null);
+            const [trips, setTrips] = useState([]);
+            const [currentTrip, setCurrentTrip] = useState(null);
             const [events, setEvents] = useState([]);
             const [friends, setFriends] = useState([]);
             const [tripMembers, setTripMembers] = useState([{ id: 'ALL', name: '全員' }]);
             const [visibleMembers, setVisibleMembers] = useState(['ALL']);
+            
             const [showAddModal, setShowAddModal] = useState(false);
             const [showSummonModal, setShowSummonModal] = useState(false);
+            const [showNewTripModal, setShowNewTripModal] = useState(false);
+            
             const [summonId, setSummonId] = useState('');
-            const [newPlan, setNewPlan] = useState({ time: '12:00', title: '', type: 'SHARED' });
+            const [newPlan, setNewPlan] = useState({ date: '', time: '12:00', title: '', type: 'SHARED' });
+            const [newTrip, setNewTrip] = useState({ title: '', start: '', end: '', invited: [] });
             const [selectedId, setSelectedId] = useState(null);
 
             useEffect(() => {
@@ -66,30 +74,33 @@
                             const me = { id: d.potatoId, name: u.displayName, photo: u.photoURL };
                             setTripMembers(p => p.find(m => m.id === me.id) ? p : [...p, me]);
                         }
+                        // 全Tripを取得
+                        db.collection('trips').orderBy('createdAt', 'desc').onSnapshot(s => {
+                            setTrips(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                        });
                     } else { setView('TripList'); setTopTab('Me'); }
                 });
                 return () => unsub();
             }, []);
 
             useEffect(() => {
-                if (view === 'MainApp') {
-                    const unsub = db.collection('events').orderBy('time').onSnapshot(s => {
+                if (view === 'MainApp' && currentTrip) {
+                    const unsub = db.collection('trips').doc(currentTrip.id).collection('events').orderBy('time').onSnapshot(s => {
                         setEvents(s.docs.map(d => ({ id: d.id, ...d.data() })));
                     });
                     return () => unsub();
                 }
-            }, [view]);
+            }, [view, currentTrip]);
 
-            // QRコード生成
             useEffect(() => {
                 if (view === 'TripList' && topTab === 'Me' && potatoId) {
                     setTimeout(() => {
-                        const el = document.getElementById('qrcode');
-                        if (el) { el.innerHTML = ''; new QRCode(el, { text: potatoId, width: 160, height: 160 }); }
-                    }, 200);
+                        const el = document.getElementById('qrcode-box');
+                        if (el) { el.innerHTML = ''; new QRCode(el, { text: potatoId, width: 140, height: 140, colorDark: "#1e293b" }); }
+                    }, 300);
                 }
                 if (window.lucide) window.lucide.createIcons();
-            }, [view, topTab, potatoId, showSummonModal, showAddModal, friends, tripMembers, events, selectedId]);
+            });
 
             const addFriend = async () => {
                 if (!summonId) return;
@@ -98,106 +109,175 @@
                 const f = s.docs.data();
                 setFriends(p => p.find(x => x.id === f.potatoId) ? p : [...p, { id: f.potatoId, name: f.displayName, photo: f.photoURL }]);
                 setSummonId('');
-                alert(f.displayName + "と仲間になりました！");
             };
 
-            // --- トップ画面 (TripList) ---
+            const handleCreateTrip = async () => {
+                if (!newTrip.title || !newTrip.start || !newTrip.end) return;
+                const membersToSave = [{ id: potatoId, name: user.displayName, photo: user.photoURL }, ...newTrip.invited];
+                await db.collection('trips').add({
+                    ...newTrip,
+                    members: membersToSave,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                setShowNewTripModal(false);
+                setNewTrip({ title: '', start: '', end: '', invited: [] });
+            };
+
+            const getDates = (start, end) => {
+                const dates = [];
+                let curr = new Date(start);
+                const stop = new Date(end);
+                while (curr <= stop) {
+                    dates.push(new Date(curr).toISOString().split('T'));
+                    curr.setDate(curr.getDate() + 1);
+                }
+                return dates;
+            };
+
             if (view === 'TripList') {
                 return (
-                    <div className="max-w-md mx-auto min-h-screen bg-white flex flex-col relative overflow-hidden shadow-2xl">
-                        <header className="bg-yellow-400 p-8 pt-12 text-center shadow-sm">
-                            <h1 className="text-4xl logo-font text-slate-900 tracking-tighter italic">PotatoPlan</h1>
+                    <div className="max-w-md mx-auto h-screen bg-white flex flex-col relative overflow-hidden shadow-2xl">
+                        <header className="bg-yellow-400 p-8 pt-10 text-center">
+                            <h1 className="text-3xl logo-font text-slate-900 tracking-tighter italic uppercase">PotatoPlan</h1>
                         </header>
-                        
-                        <main className="flex-1 overflow-y-auto p-6 pb-32">
+                        <main className="flex-1 overflow-y-auto p-6 pb-28">
                             {topTab === 'Trips' && (
-                                <div className="space-y-4 animate-bounce-in">
-                                    <h2 className="text-xl font-black mb-4">MY TRIPS</h2>
-                                    <div className="bg-yellow-400 p-8 rounded-[40px] shadow-lg border-b-8 border-yellow-600 active:translate-y-1 active:border-b-0 transition-all cursor-pointer" onClick={() => setView('MainApp')}>
-                                        <h3 className="text-2xl font-black uppercase tracking-tighter italic">HAKODATE</h3>
-                                        <p className="text-sm font-bold opacity-60 mt-1 uppercase">Worcation 2026</p>
+                                <div className="space-y-4 animate-in">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-lg font-black italic uppercase text-slate-400">My Trips</h2>
+                                        <button onClick={() => setShowNewTripModal(true)} className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all">+</button>
                                     </div>
-                                    <div className="bg-white p-6 rounded-[40px] border-4 border-dashed border-slate-200 flex items-center justify-center text-slate-300 font-black italic">COMING SOON...</div>
+                                    {trips.map(t => (
+                                        <div key={t.id} className="bg-yellow-400 p-8 rounded-[40px] shadow-lg border-b-8 border-yellow-600 active:translate-y-1 active:border-b-0 transition-all cursor-pointer mb-4" 
+                                             onClick={() => { setCurrentTrip(t); setTripMembers(t.members || []); setView('MainApp'); setNewPlan({...newPlan, date: t.start}); }}>
+                                            <h3 className="text-2xl font-black uppercase italic tracking-tighter">{t.title}</h3>
+                                            <p className="text-[10px] font-bold opacity-60 mt-1 uppercase tracking-widest">{t.start} - {t.end}</p>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
                             {topTab === 'Friends' && (
-                                <div className="space-y-6 animate-bounce-in">
-                                    <h2 className="text-xl font-black italic uppercase">Potato Friends</h2>
-                                    <div className="space-y-3">
-                                        {friends.map(f => (
-                                            <div key={f.id} className="bg-slate-50 p-4 rounded-3xl flex items-center justify-between border">
-                                                <div className="flex items-center gap-4"><img src={f.photo} className="w-12 h-12 rounded-full border-2 border-white shadow-sm"/><span className="font-black text-slate-700">{f.name}</span></div>
-                                                <span className="text-[10px] font-mono bg-white px-2 py-1 rounded shadow-sm">{f.id}</span>
-                                            </div>
-                                        ))}
-                                        <div className="flex gap-2 pt-6 border-t mt-4">
-                                            <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-4 border-slate-100 p-4 rounded-2xl uppercase font-black text-sm outline-none focus:border-yellow-400" />
-                                            <button onClick={addFriend} className="bg-slate-900 text-white px-6 rounded-2xl font-black text-xs uppercase shadow-lg">追加</button>
+                                <div className="space-y-4 animate-in">
+                                    <h2 className="text-lg font-black italic uppercase text-slate-400 tracking-widest">Friends List</h2>
+                                    {friends.map(f => (
+                                        <div key={f.id} className="bg-white p-4 rounded-3xl flex items-center justify-between border shadow-sm">
+                                            <div className="flex items-center gap-4"><img src={f.photo} className="w-10 h-10 rounded-full border-2 border-white shadow-sm"/><span className="font-black text-slate-700">{f.name}</span></div>
+                                            <span className="text-[10px] font-mono bg-slate-100 px-2 py-1 rounded">{f.id}</span>
                                         </div>
+                                    ))}
+                                    <div className="flex gap-2 pt-4 border-t">
+                                        <input type="text" value={summonId} onChange={e => setSummonId(e.target.value)} placeholder="PBID-XXXX" className="flex-1 border-2 p-3 rounded-xl uppercase font-black text-sm outline-none" />
+                                        <button onClick={addFriend} className="bg-slate-900 text-white px-6 rounded-xl font-black text-xs uppercase">追加</button>
                                     </div>
                                 </div>
                             )}
 
                             {topTab === 'Me' && (
-                                <div className="flex flex-col items-center animate-bounce-in">
-                                    <h2 className="text-xl font-black mb-8 italic uppercase text-slate-400">Personal ID</h2>
+                                <div className="flex flex-col items-center animate-in">
+                                    <h2 className="text-lg font-black italic uppercase text-slate-400 mb-6 tracking-widest">Personal ID</h2>
                                     {user ? (
-                                        <div className="bg-yellow-50 p-10 rounded-[50px] border-4 border-yellow-200 w-full flex flex-col items-center shadow-xl">
-                                            <img src={user.photoURL} className="w-24 h-24 rounded-full mb-4 border-4 border-white shadow-md"/>
-                                            <p className="font-black text-xl text-slate-700">{user.displayName}</p>
-                                            <div id="qrcode" className="p-4 bg-white rounded-3xl my-8 shadow-inner border border-yellow-100 flex items-center justify-center min-w-[192px] min-h-[192px]"></div>
-                                            <p className="text-3xl font-black logo-font text-slate-800 bg-white px-6 py-3 rounded-2xl border-2 border-yellow-200 shadow-sm">{potatoId}</p>
-                                            <button onClick={() => auth.signOut()} className="mt-12 text-xs text-slate-300 font-bold underline uppercase">Logout</button>
+                                        <div className="bg-yellow-50 p-8 rounded-[40px] border-2 border-yellow-200 w-full flex flex-col items-center shadow-lg">
+                                            <img src={user.photoURL} className="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-md"/>
+                                            <p className="font-black text-lg text-slate-700">{user.displayName}</p>
+                                            <div id="qrcode-box" className="p-4 bg-white rounded-3xl my-6 shadow-inner border border-yellow-100 flex items-center justify-center min-w-[172px] min-h-[172px]"></div>
+                                            <p className="text-2xl font-black logo-font text-slate-800 bg-white px-5 py-2 rounded-xl border-2 border-yellow-200 shadow-sm tracking-widest">{potatoId}</p>
+                                            <button onClick={() => auth.signOut()} className="mt-8 text-[10px] text-slate-300 font-bold underline uppercase italic">Logout</button>
                                         </div>
                                     ) : (
-                                        <button onClick={() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())} className="bg-slate-900 text-white px-12 py-6 rounded-full font-black shadow-2xl text-lg active:scale-95 transition-all">LOGIN WITH GOOGLE</button>
+                                        <button onClick={() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())} className="bg-slate-900 text-white px-10 py-5 rounded-full font-black shadow-xl active:scale-95 transition-all uppercase tracking-widest">Login</button>
                                     )}
                                 </div>
                             )}
                         </main>
+                        
+                        {showNewTripModal && (
+                            <div className="absolute inset-0 bg-slate-900/80 z- flex items-center justify-center p-6 backdrop-blur-md animate-in">
+                                <div className="w-full bg-white rounded-[40px] p-8 shadow-2xl max-h-[90%] flex flex-col overflow-y-auto no-scrollbar">
+                                    <h2 className="text-xl font-black italic mb-6 uppercase tracking-widest">New Trip</h2>
+                                    <div className="space-y-4">
+                                        <input type="text" placeholder="TRIP NAME" value={newTrip.title} onChange={e => setNewTrip({...newTrip, title: e.target.value})} className="w-full bg-slate-50 border-2 p-4 rounded-2xl font-black outline-none focus:border-yellow-400" />
+                                        <div className="flex gap-2">
+                                            <input type="date" value={newTrip.start} onChange={e => setNewTrip({...newTrip, start: e.target.value})} className="flex-1 bg-slate-50 border-2 p-3 rounded-xl font-black text-xs" />
+                                            <input type="date" value={newTrip.end} onChange={e => setNewTrip({...newTrip, end: e.target.value})} className="flex-1 bg-slate-50 border-2 p-3 rounded-xl font-black text-xs" />
+                                        </div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase mt-4">Invite Friends</p>
+                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                                            {friends.map(f => (
+                                                <div key={f.id} onClick={() => {
+                                                    const isInvited = newTrip.invited.find(i => i.id === f.id);
+                                                    setNewTrip({...newTrip, invited: isInvited ? newTrip.invited.filter(i => i.id !== f.id) : [...newTrip.invited, f]});
+                                                }} className={`p-3 rounded-2xl flex items-center gap-3 border transition-all cursor-pointer ${newTrip.invited.find(i => i.id === f.id) ? 'bg-yellow-50 border-yellow-400' : 'bg-white'}`}>
+                                                    <img src={f.photo} className="w-8 h-8 rounded-full" />
+                                                    <span className="text-sm font-bold">{f.name}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex gap-2 pt-4">
+                                            <button onClick={() => setShowNewTripModal(false)} className="flex-1 p-4 font-black text-slate-300 uppercase text-xs">Cancel</button>
+                                            <button onClick={handleCreateTrip} className="flex-2 bg-slate-900 text-white px-8 p-4 rounded-2xl font-black shadow-lg uppercase text-xs">Create Trip</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
-                        <nav className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-slate-100 flex justify-around p-6 pb-10 shadow-2xl z-20">
-                            <button onClick={() => setTopTab('Trips')} className={`flex flex-col items-center ${topTab === 'Trips' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="map"></i><span className="text-[10px] mt-1 font-black italic">TRIPS</span></button>
-                            <button onClick={() => setTopTab('Friends')} className={`flex flex-col items-center ${topTab === 'Friends' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="users"></i><span className="text-[10px] mt-1 font-black italic">FRIENDS</span></button>
-                            <button onClick={() => setTopTab('Me')} className={`flex flex-col items-center ${topTab === 'Me' ? 'text-yellow-500' : 'text-slate-300'}`}><i data-lucide="user"></i><span className="text-[10px] mt-1 font-black italic">ME</span></button>
+                        <nav className="absolute bottom-0 left-0 right-0 bg-white border-t p-6 pb-10 flex justify-around shadow-2xl z-20">
+                            <button onClick={() => setTopTab('Trips')} className={`flex flex-col items-center ${topTab === 'Trips' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="map"></i><span className="text-[10px] mt-1 font-black italic">TRIPS</span></button>
+                            <button onClick={() => setTopTab('Friends')} className={`flex flex-col items-center ${topTab === 'Friends' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="users"></i><span className="text-[10px] mt-1 font-black italic">FRIENDS</span></button>
+                            <button onClick={() => setTopTab('Me')} className={`flex flex-col items-center ${topTab === 'Me' ? 'text-yellow-500' : 'text-slate-200'}`}><i data-lucide="user"></i><span className="text-[10px] mt-1 font-black italic">ME</span></button>
                         </nav>
                     </div>
                 );
             }
 
-            // --- トリップ画面 (MainApp) ---
+            // --- MainApp (Multiple Days Horizontal) ---
             return (
-                <div className="max-w-md mx-auto min-h-screen bg-white flex flex-col relative overflow-hidden shadow-2xl">
+                <div className="max-w-md mx-auto h-screen bg-white flex flex-col relative overflow-hidden shadow-2xl">
                     <header className="bg-yellow-400 p-6 flex items-center justify-between shadow-sm">
-                        <button onClick={() => setView('TripList')} className="p-2 bg-white/40 rounded-full active:scale-90 transition-all"><i data-lucide="chevron-left"></i></button>
-                        <h1 className="text-2xl logo-font uppercase tracking-tighter italic">HAKODATE</h1>
-                        <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-4 py-2 rounded-full font-black uppercase tracking-widest active:scale-90 transition-all shadow-lg">召喚</button>
+                        <button onClick={() => setView('TripList')} className="p-2 bg-white/40 rounded-full"><i data-lucide="chevron-left"></i></button>
+                        <h1 className="text-xl logo-font uppercase tracking-tighter italic">{currentTrip?.title}</h1>
+                        <button onClick={() => setShowSummonModal(true)} className="bg-slate-900 text-white text-[10px] px-3 py-2 rounded-full font-black uppercase">召喚</button>
                     </header>
-
-                    <main className="flex-1 overflow-y-auto pb-32 no-scrollbar" onClick={() => setSelectedId(null)}>
-                        <div className="flex gap-4 p-5 overflow-x-auto border-b-2 border-slate-50 bg-slate-50 sticky top-0 z-10 no-scrollbar shadow-inner">
+                    <main className="flex-1 overflow-hidden flex flex-col" onClick={() => setSelectedId(null)}>
+                        {/* Member Filter */}
+                        <div className="flex gap-4 p-5 overflow-x-auto border-b bg-slate-50 no-scrollbar shadow-inner shrink-0">
                             {tripMembers.map(m => (
                                 <div key={m.id} onClick={() => m.id !== 'ALL' && setVisibleMembers(p => p.includes(m.id) ? p.filter(x => x !== m.id) : [...p, m.id])}
                                      className={`cursor-pointer flex flex-col items-center min-w-[70px] p-2 rounded-2xl transition-all ${visibleMembers.includes(m.id) ? 'bg-white shadow-md ring-4 ring-yellow-400 scale-105' : 'opacity-20'}`}>
-                                    {m.photo ? <img src={m.photo} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" /> : <div className="w-12 h-12 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-black">ALL</div>}
+                                    {m.photo ? <img src={m.photo} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" /> : <div className="w-12 h-12 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-black italic">ALL</div>}
                                     <span className="text-[9px] font-black text-slate-500 mt-1 uppercase tracking-tighter truncate w-full text-center">{m.name ? m.name.split(' ') : '...'}</span>
                                 </div>
                             ))}
                         </div>
-                        <div className="p-8 border-l-4 border-yellow-100 ml-8 space-y-10 mt-4">
-                            {events.filter(e => visibleMembers.includes(e.owner)).map((e, i) => (
-                                <div key={i} className="relative group" onClick={(ev) => { ev.stopPropagation(); setSelectedId(selectedId === e.id ? null : e.id); }}>
-                                    <div className={`absolute -left-[40px] top-1 w-6 h-6 rounded-full border-4 border-white shadow-sm transition-colors ${e.type === 'SHARED' ? 'bg-yellow-400' : 'bg-blue-400'}`}></div>
-                                    <div className="text-[10px] font-black text-slate-300 mb-2 uppercase tracking-widest">{e.time}</div>
-                                    <div className={`p-6 rounded-[32px] shadow-sm border-2 transition-all ${selectedId === e.id ? 'ring-4 ring-red-400 border-red-100 bg-red-50' : 'border-slate-50 bg-slate-50'}`}>
-                                        <div className="flex justify-between items-start">
-                                            <div className={`text-md font-black italic ${selectedId === e.id ? 'text-red-600' : 'text-slate-700'}`}>{e.title}</div>
-                                            {selectedId === e.id && (
-                                                <button onClick={async () => { if(confirm("消す？🍟")) await db.collection('events').doc(e.id).delete(); }} className="p-2 bg-red-500 text-white rounded-full shadow-lg active:scale-125 transition-transform"><i data-lucide="trash-2" size={16}></i></button>
-                                            )}
+
+                        {/* Horizontal Scroll Days */}
+                        <div className="flex-1 flex overflow-x-auto snap-x snap-mandatory no-scrollbar bg-white">
+                            {currentTrip && getDates(currentTrip.start, currentTrip.end).map((date, idx) => (
+                                <div key={date} className="min-w-full h-full snap-start flex flex-col overflow-y-auto no-scrollbar p-8">
+                                    <div className="flex items-center gap-3 mb-8">
+                                        <div className="bg-slate-900 text-white w-10 h-10 rounded-full flex items-center justify-center font-black logo-font italic">{idx + 1}</div>
+                                        <div>
+                                            <p className="text-2xl font-black italic uppercase tracking-tighter">Day {idx + 1}</p>
+                                            <p className="text-[10px] font-black text-slate-300 tracking-widest uppercase">{date}</p>
                                         </div>
-                                        <div className="text-[9px] font-bold text-slate-400 uppercase mt-2 tracking-widest">{e.ownerName}</div>
+                                    </div>
+                                    <div className="border-l-4 border-yellow-100 ml-4 space-y-10 pl-8 pb-32 relative">
+                                        {events.filter(e => e.date === date && visibleMembers.includes(e.owner)).map((e, i) => (
+                                            <div key={i} className="relative" onClick={(ev) => { ev.stopPropagation(); setSelectedId(selectedId === e.id ? null : e.id); }}>
+                                                <div className={`absolute -left-[40px] top-1 w-6 h-6 rounded-full border-4 border-white shadow-sm transition-colors ${e.type === 'SHARED' ? 'bg-yellow-400' : 'bg-blue-400'}`}></div>
+                                                <div className="text-[10px] font-black text-slate-300 mb-2 uppercase tracking-widest italic">{e.time}</div>
+                                                <div className={`p-6 rounded-[32px] shadow-sm border-2 transition-all ${selectedId === e.id ? 'ring-4 ring-red-400 border-red-100 bg-red-50' : 'border-slate-50 bg-slate-50'}`}>
+                                                    <div className="flex justify-between items-start">
+                                                        <div className={`text-md font-black italic ${selectedId === e.id ? 'text-red-600' : 'text-slate-700'}`}>{e.title}</div>
+                                                        {selectedId === e.id && (
+                                                            <button onClick={async () => { if(confirm("消す？🍟")) await db.collection('trips').doc(currentTrip.id).collection('events').doc(e.id).delete(); }} className="p-2 bg-red-500 text-white rounded-full active:scale-125"><i data-lucide="trash-2" size={16}></i></button>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-[9px] font-bold text-slate-300 uppercase mt-2 tracking-widest italic">{e.ownerName}</div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             ))}
@@ -205,51 +285,9 @@
                     </main>
 
                     {showSummonModal && (
-                        <div className="absolute inset-0 bg-slate-900/80 z- flex items-center justify-center p-8 backdrop-blur-lg animate-bounce-in">
-                            <div className="w-full bg-white rounded-[50px] p-10 shadow-2xl flex flex-col overflow-hidden max-h-[80%]">
-                                <h2 className="text-2xl font-black italic mb-6 uppercase tracking-widest">召喚リスト</h2>
+                        <div className="absolute inset-0 bg-slate-900/80 z- flex items-center justify-center p-8 backdrop-blur-md animate-in">
+                            <div className="w-full bg-white rounded-[50px] p-10 shadow-2xl flex flex-col max-h-[80%]">
+                                <h2 className="text-2xl font-black italic mb-6 uppercase tracking-widest text-center">召喚リスト</h2>
                                 <div className="flex-1 overflow-y-auto space-y-4 pr-2 no-scrollbar">
                                     {friends.map(f => (
-                                        <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ? p : [...p, f]); setShowSummonModal(false); }} className="bg-slate-50 p-5 rounded-[30px] flex items-center gap-4 border-2 border-transparent active:border-yellow-400 active:bg-yellow-50 cursor-pointer shadow-sm transition-all">
-                                            <img src={f.photo} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" />
-                                            <div className="font-black text-slate-700">{f.name}</div>
-                                            <i data-lucide="user-plus" className="ml-auto text-slate-300"></i>
-                                        </div>
-                                    ))}
-                                    {friends.length === 0 && <p className="text-center py-10 text-xs font-black text-slate-400 uppercase tracking-widest leading-relaxed">仲間がまだいません<br/>MEタブで追加してね🍟</p>}
-                                </div>
-                                <button onClick={() => setShowSummonModal(false)} className="mt-8 font-black text-slate-400 text-[10px] uppercase tracking-widest border-t pt-6">CLOSE</button>
-                            </div>
-                        </div>
-                    )}
-
-                    {showAddModal && (
-                        <div className="absolute inset-0 bg-slate-900/60 z-50 flex items-end backdrop-blur-sm">
-                            <div className="w-full bg-white rounded-t-[50px] p-10 animate-bounce-in shadow-2xl">
-                                <h2 className="text-2xl font-black italic uppercase mb-8 tracking-tighter">New Plan</h2>
-                                <input type="text" value={newPlan.title} onChange={x => setNewPlan({...newPlan, title: x.target.value})} className="w-full bg-slate-100 p-6 rounded-3xl mb-4 font-black outline-none border-4 border-transparent focus:border-yellow-400 transition-all" placeholder="予定..." />
-                                <div className="flex gap-4 mb-10">
-                                    <input type="time" value={newPlan.time} onChange={x => setNewPlan({...newPlan, time: x.target.value})} className="flex-1 bg-slate-100 p-5 rounded-3xl font-black outline-none border-4 border-transparent focus:border-yellow-400" />
-                                    <select value={newPlan.type} onChange={x => setNewPlan({...newPlan, type: x.target.value})} className="flex-1 bg-slate-100 p-5 rounded-3xl font-black outline-none border-4 border-transparent focus:border-yellow-400">
-                                        <option value="SHARED">全員</option><option value="PERSONAL">個人</option>
-                                    </select>
-                                </div>
-                                <button onClick={async () => {
-                                    if (!newPlan.title) return;
-                                    await db.collection('events').add({ ...newPlan, owner: newPlan.type === 'SHARED' ? 'ALL' : (potatoId || 'Guest'), ownerName: user?.displayName || 'Guest' });
-                                    setShowAddModal(false);
-                                    setNewPlan({ time: '12:00', title: '', type: 'SHARED' });
-                                }} className="w-full bg-yellow-400 p-6 rounded-3xl font-black text-slate-900 shadow-xl active:scale-95 transition-all text-lg uppercase">ADD TO TRIP</button>
-                            </div>
-                        </div>
-                    )}
-
-                    <button onClick={() => setShowAddModal(true)} className="absolute bottom-10 right-10 w-20 h-20 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-90 transition-transform font-black text-3xl">+</button>
-                </div>
-            );
-        };
-
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-    </script>
-</body>
-</html>
+                                        <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ?
