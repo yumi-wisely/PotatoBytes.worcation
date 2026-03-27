@@ -290,4 +290,61 @@
                                 <h2 className="text-2xl font-black italic mb-6 uppercase tracking-widest text-center">召喚リスト</h2>
                                 <div className="flex-1 overflow-y-auto space-y-4 pr-2 no-scrollbar">
                                     {friends.map(f => (
-                                        <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ?
+                                        <div key={f.id} onClick={() => { setTripMembers(p => p.find(x => x.id === f.id) ? p : [...p, f]); setShowSummonModal(false); }} className="bg-slate-50 p-5 rounded-[30px] flex items-center gap-4 active:bg-yellow-50 cursor-pointer shadow-sm">
+                                            <img src={f.photo} className="w-10 h-10 rounded-full border shadow-sm" />
+                                            <div className="font-black text-slate-700 text-sm">{f.name}</div>
+                                            <i data-lucide="user-plus" className="ml-auto text-slate-300"></i>
+                                        </div>
+                                    ))}
+                                    {friends.length === 0 && <p className="text-center py-6 text-[10px] font-black text-slate-300 uppercase">仲間がいません🍟</p>}
+                                </div>
+                                <button onClick={() => setShowSummonModal(false)} className="mt-8 font-black text-slate-300 text-[10px] uppercase tracking-widest">CLOSE</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddModal && (
+                        <div className="absolute inset-0 bg-slate-900/60 z-50 flex items-end">
+                            <div className="w-full bg-white rounded-t-[50px] p-10 animate-in shadow-2xl max-h-[90%] overflow-y-auto no-scrollbar">
+                                <h2 className="text-2xl font-black italic uppercase mb-8">New Plan</h2>
+                                <div className="space-y-4">
+                                    <input type="text" value={newPlan.title} onChange={x => setNewPlan({...newPlan, title: x.target.value})} className="w-full bg-slate-100 p-6 rounded-3xl font-black outline-none border-4 border-transparent focus:border-yellow-400 transition-all shadow-inner" placeholder="予定は？" />
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Date</label>
+                                        <select value={newPlan.date} onChange={x => setNewPlan({...newPlan, date: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner">
+                                            {currentTrip && getDates(currentTrip.start, currentTrip.end).map(d => (
+                                                <option key={d} value={d}>{d}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1 flex flex-col gap-2">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Time</label>
+                                            <input type="time" value={newPlan.time} onChange={x => setNewPlan({...newPlan, time: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner" />
+                                        </div>
+                                        <div className="flex-1 flex flex-col gap-2">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Type</label>
+                                            <select value={newPlan.type} onChange={x => setNewPlan({...newPlan, type: x.target.value})} className="w-full bg-slate-100 p-5 rounded-3xl font-black outline-none shadow-inner">
+                                                <option value="SHARED">全員</option><option value="PERSONAL">個人</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <button onClick={async () => {
+                                        if (!newPlan.title || !newPlan.date) return;
+                                        await db.collection('trips').doc(currentTrip.id).collection('events').add({ ...newPlan, owner: newPlan.type === 'SHARED' ? 'ALL' : (potatoId || 'Me'), ownerName: user?.displayName || 'Me', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                                        setShowAddModal(false);
+                                        setNewPlan({ ...newPlan, title: '' });
+                                    }} className="w-full bg-yellow-400 p-6 rounded-3xl font-black text-slate-900 shadow-xl active:scale-95 transition-all text-lg uppercase tracking-widest mt-6">ADD TO TRIP</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <button onClick={() => setShowAddModal(true)} className="absolute bottom-10 right-10 w-20 h-20 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-90 transition-all font-black text-3xl shadow-slate-400">+</button>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
